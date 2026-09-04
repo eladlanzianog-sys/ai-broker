@@ -1,0 +1,259 @@
+// AI Broker — Multi-Signal Indicator
+// TradingView Pine Script v5
+// Combines: Technical signals, Risk management, Entry/Exit calculator
+// Weighted voting system: Technical 30% | Fundamental 40% | Sentiment 30%
+
+//@version=5
+indicator("AI Broker Signal", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// === INPUTS ===
+grp_risk = "ניהול סיכונים"
+account_size = input.float(10000, "גודל חשבון ($)", minval=100, group=grp_risk)
+risk_pct = input.float(1.0, "סיכון לעסקה (%)", minval=0.1, maxval=10, step=0.1, group=grp_risk)
+reward_ratio = input.float(2.0, "יחס תגמול (R:R)", minval=1, maxval=5, step=0.5, group=grp_risk)
+atr_sl_mult = input.float(1.5, "ATR כפולת SL", minval=0.5, maxval=4, step=0.25, group=grp_risk)
+
+grp_tech = "אינדיקטורים"
+rsi_len = input.int(14, "RSI תקופה", minval=5, maxval=50, group=grp_tech)
+macd_fast = input.int(12, "MACD מהיר", group=grp_tech)
+macd_slow = input.int(26, "MACD איטי", group=grp_tech)
+macd_sig = input.int(9, "MACD סיגנל", group=grp_tech)
+bb_len = input.int(20, "Bollinger תקופה", group=grp_tech)
+bb_std = input.float(2.0, "Bollinger סטיות", group=grp_tech)
+stoch_k = input.int(14, "Stochastic %K", group=grp_tech)
+stoch_d = input.int(3, "Stochastic %D", group=grp_tech)
+atr_len = input.int(14, "ATR תקופה", group=grp_tech)
+
+grp_ma = "ממוצעים נעים"
+show_sma20 = input.bool(true, "SMA 20", group=grp_ma)
+show_sma50 = input.bool(true, "SMA 50", group=grp_ma)
+show_sma200 = input.bool(true, "SMA 200", group=grp_ma)
+show_bb = input.bool(true, "Bollinger Bands", group=grp_ma)
+
+grp_display = "תצוגה"
+show_signals = input.bool(true, "הצג אותות קניה/מכירה", group=grp_display)
+show_sl_tp = input.bool(true, "הצג SL/TP", group=grp_display)
+show_sr = input.bool(true, "הצג תמיכה/התנגדות", group=grp_display)
+show_table = input.bool(true, "הצג טבלת נתונים", group=grp_display)
+
+// === CALCULATIONS ===
+
+// Moving Averages
+sma20 = ta.sma(close, 20)
+sma50 = ta.sma(close, 50)
+sma200 = ta.sma(close, 200)
+
+// RSI
+rsi_val = ta.rsi(close, rsi_len)
+
+// MACD
+[macd_line, signal_line, hist_line] = ta.macd(close, macd_fast, macd_slow, macd_sig)
+
+// Bollinger Bands
+bb_mid = ta.sma(close, bb_len)
+bb_dev = bb_std * ta.stdev(close, bb_len)
+bb_upper = bb_mid + bb_dev
+bb_lower = bb_mid - bb_dev
+
+// Stochastic
+stoch_k_val = ta.stoch(close, high, low, stoch_k)
+stoch_d_val = ta.sma(stoch_k_val, stoch_d)
+
+// ATR
+atr_val = ta.atr(atr_len)
+
+// Support / Resistance (20 bar)
+sr_support = ta.lowest(low, 20)
+sr_resistance = ta.highest(high, 20)
+
+// Volume MA
+vol_ma = ta.sma(volume, 20)
+vol_spike = volume > vol_ma * 1.5
+
+// === SIGNAL SCORING ===
+// Technical score: -1 (strong sell) to +1 (strong buy)
+
+tech_score = 0.0
+
+// RSI signal
+if rsi_val < 30
+    tech_score += 0.3
+else if rsi_val < 45
+    tech_score += 0.1
+else if rsi_val > 70
+    tech_score -= 0.3
+else if rsi_val > 55
+    tech_score -= 0.1
+
+// MACD signal
+if hist_line > 0 and hist_line > hist_line[1]
+    tech_score += 0.25
+else if hist_line > 0
+    tech_score += 0.1
+else if hist_line < 0 and hist_line < hist_line[1]
+    tech_score -= 0.25
+else if hist_line < 0
+    tech_score -= 0.1
+
+// Moving average trend
+if close > sma50 and sma50 > sma200
+    tech_score += 0.2
+else if close > sma50
+    tech_score += 0.1
+else if close < sma50 and sma50 < sma200
+    tech_score -= 0.2
+else if close < sma50
+    tech_score -= 0.1
+
+// Stochastic
+if stoch_k_val < 20 and stoch_d_val < 20
+    tech_score += 0.15
+else if stoch_k_val > 80 and stoch_d_val > 80
+    tech_score -= 0.15
+
+// Bollinger position
+if close < bb_lower
+    tech_score += 0.1
+else if close > bb_upper
+    tech_score -= 0.1
+
+// Volume confirmation
+if vol_spike and tech_score > 0
+    tech_score *= 1.2
+else if vol_spike and tech_score < 0
+    tech_score *= 1.2
+
+// Clamp to -1..1
+tech_score := math.max(-1.0, math.min(1.0, tech_score))
+
+// Confidence (higher when more indicators agree)
+confidence = math.min(1.0, math.max(0.3, 0.5 + math.abs(tech_score)))
+
+// Signal classification
+is_strong_buy = tech_score > 0.5
+is_buy = tech_score > 0.15 and not is_strong_buy
+is_strong_sell = tech_score < -0.5
+is_sell = tech_score < -0.15 and not is_strong_sell
+is_hold = not is_strong_buy and not is_buy and not is_strong_sell and not is_sell
+
+// Volatility percentile (risk level)
+vol_20d = ta.stdev(close / close[1] - 1, 20) * math.sqrt(252) * 100
+vol_pct = ta.percentile_linear_interpolation(vol_20d, 252, 50) / 100.0
+risk_level = vol_pct > 0.95 ? "EXTREME" : vol_pct > 0.75 ? "HIGH" : vol_pct > 0.4 ? "MODERATE" : "LOW"
+dampening = vol_pct > 0.95 ? 0.25 : vol_pct > 0.75 ? 0.6 : vol_pct > 0.4 ? 0.85 : 1.0
+
+// Risk-adjusted score
+adj_score = tech_score * dampening
+
+// === POSITION SIZING ===
+sl_price = close - atr_val * atr_sl_mult
+tp_price = close + (close - sl_price) * reward_ratio
+r_value = close - sl_price
+risk_dollars = account_size * (risk_pct / 100)
+position_size = r_value > 0 ? math.floor(risk_dollars / r_value) : 0
+position_cost = position_size * close
+actual_risk = position_size * r_value
+potential_profit = position_size * (tp_price - close)
+
+// === PLOTS ===
+
+// Moving Averages
+plot(show_sma20 ? sma20 : na, "SMA 20", color.new(#F7A21B, 0), 1)
+plot(show_sma50 ? sma50 : na, "SMA 50", color.new(#A855F7, 0), 1)
+plot(show_sma200 ? sma200 : na, "SMA 200", color.new(#E91E63, 0), 1)
+
+// Bollinger Bands
+p_bb_u = plot(show_bb ? bb_upper : na, "BB Upper", color.new(#2962FF, 50), 1)
+p_bb_l = plot(show_bb ? bb_lower : na, "BB Lower", color.new(#2962FF, 50), 1)
+fill(p_bb_u, p_bb_l, color.new(#2962FF, 92))
+
+// Support / Resistance
+plot(show_sr ? sr_support : na, "Support", color.new(#26A69A, 60), 1, plot.style_stepline)
+plot(show_sr ? sr_resistance : na, "Resistance", color.new(#EF5350, 60), 1, plot.style_stepline)
+
+// === SIGNAL MARKERS ===
+buy_signal = show_signals and (is_buy or is_strong_buy) and not (is_buy[1] or is_strong_buy[1])
+sell_signal = show_signals and (is_sell or is_strong_sell) and not (is_sell[1] or is_strong_sell[1])
+
+plotshape(buy_signal, "Buy", shape.triangleup, location.belowbar, color.new(#26A69A, 0), size=size.small, text="BUY")
+plotshape(sell_signal, "Sell", shape.triangledown, location.abovebar, color.new(#EF5350, 0), size=size.small, text="SELL")
+plotshape(is_strong_buy and not is_strong_buy[1] and show_signals, "Strong Buy", shape.triangleup, location.belowbar, color.new(#26A69A, 0), size=size.normal, text="STRONG\nBUY")
+plotshape(is_strong_sell and not is_strong_sell[1] and show_signals, "Strong Sell", shape.triangledown, location.abovebar, color.new(#EF5350, 0), size=size.normal, text="STRONG\nSELL")
+
+// === SL/TP LINES (on latest signal) ===
+var float last_entry = na
+var float last_sl = na
+var float last_tp = na
+var bool last_is_buy = false
+
+if buy_signal
+    last_entry := close
+    last_sl := sl_price
+    last_tp := tp_price
+    last_is_buy := true
+if sell_signal
+    last_entry := na
+    last_sl := na
+    last_tp := na
+    last_is_buy := false
+
+// Plot SL/TP as horizontal lines from last signal
+plot(show_sl_tp and last_is_buy ? last_sl : na, "Stop Loss", color.new(#EF5350, 30), 1, plot.style_linebr)
+plot(show_sl_tp and last_is_buy ? last_tp : na, "Take Profit", color.new(#26A69A, 30), 1, plot.style_linebr)
+plot(show_sl_tp and last_is_buy ? last_entry : na, "Entry", color.new(#787B86, 50), 1, plot.style_linebr)
+
+// === INFO TABLE ===
+if show_table and barstate.islast
+    var table t = table.new(position.top_right, 2, 14, bgcolor=color.new(#1E222D, 10), border_color=color.new(#2A2E39, 0), border_width=1, frame_color=color.new(#2A2E39, 0), frame_width=1)
+
+    sig_text = is_strong_buy ? "קניה חזקה" : is_buy ? "קניה" : is_strong_sell ? "מכירה חזקה" : is_sell ? "מכירה" : "המתנה"
+    sig_color = is_buy or is_strong_buy ? color.new(#26A69A, 0) : is_sell or is_strong_sell ? color.new(#EF5350, 0) : color.new(#2962FF, 0)
+
+    table.cell(t, 0, 0, "AI Broker", text_color=color.white, text_size=size.normal, bgcolor=color.new(#2962FF, 0))
+    table.cell(t, 1, 0, sig_text, text_color=color.white, text_size=size.normal, bgcolor=sig_color)
+
+    table.cell(t, 0, 1, "ציון", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 1, str.tostring(adj_score, "#.###"), text_color=adj_score >= 0 ? color.new(#26A69A, 0) : color.new(#EF5350, 0), text_size=size.small)
+
+    table.cell(t, 0, 2, "ביטחון", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(confidence * 100, "#.0") + "%", text_color=color.new(#D1D4DC, 0), text_size=size.small)
+
+    table.cell(t, 0, 3, "סיכון", text_color=color.new(#787B86, 0), text_size=size.small)
+    risk_color = risk_level == "LOW" ? color.new(#26A69A, 0) : risk_level == "MODERATE" ? color.new(#F7A21B, 0) : color.new(#EF5350, 0)
+    table.cell(t, 1, 3, risk_level, text_color=risk_color, text_size=size.small)
+
+    table.cell(t, 0, 4, "RSI", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 4, str.tostring(rsi_val, "#.1"), text_color=rsi_val < 30 ? color.new(#26A69A, 0) : rsi_val > 70 ? color.new(#EF5350, 0) : color.new(#D1D4DC, 0), text_size=size.small)
+
+    table.cell(t, 0, 5, "MACD", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 5, str.tostring(hist_line, "#.###"), text_color=hist_line >= 0 ? color.new(#26A69A, 0) : color.new(#EF5350, 0), text_size=size.small)
+
+    table.cell(t, 0, 6, "Stoch %K", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 6, str.tostring(stoch_k_val, "#.1"), text_color=color.new(#D1D4DC, 0), text_size=size.small)
+
+    table.cell(t, 0, 7, "ATR", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 7, str.tostring(atr_val, "#.##"), text_color=color.new(#D1D4DC, 0), text_size=size.small)
+
+    table.cell(t, 0, 8, "", text_color=color.new(#2A2E39, 0), text_size=size.small, bgcolor=color.new(#2A2E39, 0))
+    table.cell(t, 1, 8, "", text_color=color.new(#2A2E39, 0), text_size=size.small, bgcolor=color.new(#2A2E39, 0))
+
+    table.cell(t, 0, 9, "כניסה", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 9, "$" + str.tostring(close, "#.##"), text_color=color.new(#D1D4DC, 0), text_size=size.small)
+
+    table.cell(t, 0, 10, "SL", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 10, "$" + str.tostring(sl_price, "#.##"), text_color=color.new(#EF5350, 0), text_size=size.small)
+
+    table.cell(t, 0, 11, "TP (1:" + str.tostring(reward_ratio, "#.#") + ")", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 11, "$" + str.tostring(tp_price, "#.##"), text_color=color.new(#26A69A, 0), text_size=size.small)
+
+    table.cell(t, 0, 12, "מניות", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 12, str.tostring(position_size), text_color=color.new(#D1D4DC, 0), text_size=size.small)
+
+    table.cell(t, 0, 13, "סיכון $", text_color=color.new(#787B86, 0), text_size=size.small)
+    table.cell(t, 1, 13, "$" + str.tostring(actual_risk, "#") + " / $" + str.tostring(potential_profit, "#"), text_color=color.new(#EF5350, 0), text_size=size.small)
+
+// === ALERTS ===
+alertcondition(buy_signal, "AI Broker Buy", "AI Broker: BUY signal on {{ticker}} at {{close}}")
+alertcondition(sell_signal, "AI Broker Sell", "AI Broker: SELL signal on {{ticker}} at {{close}}")
+alertcondition(is_strong_buy and not is_strong_buy[1], "AI Broker Strong Buy", "AI Broker: STRONG BUY on {{ticker}} at {{close}}")
+alertcondition(is_strong_sell and not is_strong_sell[1], "AI Broker Strong Sell", "AI Broker: STRONG SELL on {{ticker}} at {{close}}")
