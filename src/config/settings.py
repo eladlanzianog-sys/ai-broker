@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-4-20250514"
     redis_url: str = "redis://localhost:6379/0"
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/stock_analysis"
+    database_url: str = ""
     finnhub_api_key: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

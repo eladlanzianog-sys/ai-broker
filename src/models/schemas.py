@@ -27,7 +27,7 @@ class RiskLevel(str, enum.Enum):
 
 
 class AnalysisRequest(BaseModel):
-    ticker: str = Field(..., description="Stock ticker symbol, e.g. 'AAPL'")
+    ticker: str = Field(..., pattern=r"^[A-Z0-9.\-]{1,10}$", description="Stock ticker symbol, e.g. 'AAPL'")
     date_range_days: int = Field(default=365, ge=30, le=1825)
     request_id: str = Field(..., description="Unique idempotency key")
     requested_at: datetime = Field(default_factory=datetime.utcnow)

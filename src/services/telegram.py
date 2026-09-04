@@ -1,4 +1,6 @@
 """Telegram bot integration for trading signal alerts."""
+import html as _html
+
 import httpx
 
 from src.config.settings import Settings
@@ -22,9 +24,7 @@ SIGNAL_HEBREW = {
 
 
 def _esc(text: str) -> str:
-    for ch in ("&", "<", ">"):
-        text = text.replace(ch, f"&#{ord(ch)};")
-    return text
+    return _html.escape(text, quote=True)
 
 
 def format_recommendation(rec: FinalRecommendation) -> str:
@@ -90,7 +90,7 @@ async def send_telegram_alert(rec: FinalRecommendation, settings: Settings | Non
     message = format_recommendation(rec)
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
         response = await client.post(url, json={
             "chat_id": settings.telegram_chat_id,
             "text": message,

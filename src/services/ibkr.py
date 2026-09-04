@@ -213,6 +213,18 @@ class IBKRService:
             raise PermissionError("Cannot place orders in readonly mode")
         if quantity <= 0:
             raise ValueError("Quantity must be positive")
+        if stop_loss_price <= 0 or take_profit_price <= 0:
+            raise ValueError("SL and TP prices must be positive")
+        if side == OrderSide.BUY:
+            if entry_price and not (stop_loss_price < entry_price < take_profit_price):
+                raise ValueError(
+                    f"BUY order requires SL ({stop_loss_price}) < Entry ({entry_price}) < TP ({take_profit_price})"
+                )
+        elif side == OrderSide.SELL:
+            if entry_price and not (take_profit_price < entry_price < stop_loss_price):
+                raise ValueError(
+                    f"SELL order requires TP ({take_profit_price}) < Entry ({entry_price}) < SL ({stop_loss_price})"
+                )
 
         contract = Stock(ticker, "SMART", "USD")
         self.ib.qualifyContracts(contract)
