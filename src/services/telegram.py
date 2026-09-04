@@ -21,12 +21,18 @@ SIGNAL_HEBREW = {
 }
 
 
+def _esc(text: str) -> str:
+    for ch in ("&", "<", ">"):
+        text = text.replace(ch, f"&#{ord(ch)};")
+    return text
+
+
 def format_recommendation(rec: FinalRecommendation) -> str:
     emoji = SIGNAL_EMOJI.get(rec.action, "")
     signal_name = SIGNAL_HEBREW.get(rec.action, rec.action.value)
 
     lines = [
-        f"{emoji} *{rec.ticker}* — {signal_name}",
+        f"{emoji} <b>{_esc(rec.ticker)}</b> — {signal_name}",
         "",
         f"\U0001f3af ביטחון: {rec.confidence:.0%}",
         f"\U0001f4ca ציון משוקלל: {rec.weighted_score:+.3f}",
@@ -48,7 +54,7 @@ def format_recommendation(rec: FinalRecommendation) -> str:
 
     lines.extend([
         "",
-        "\U0001f50d *משקלות סוכנים:*",
+        "\U0001f50d <b>משקלות סוכנים:</b>",
         f"  טכני ({rec.technical_weight:.0%}) | "
         f"פונדמנטלי ({rec.fundamental_weight:.0%}) | "
         f"סנטימנט ({rec.sentiment_weight:.0%})",
@@ -56,13 +62,13 @@ def format_recommendation(rec: FinalRecommendation) -> str:
 
     if rec.dissenting_opinions:
         lines.append("")
-        lines.append("⚠️ *דעות חולקות:*")
+        lines.append("⚠️ <b>דעות חולקות:</b>")
         for opinion in rec.dissenting_opinions:
-            lines.append(f"  • {opinion}")
+            lines.append(f"  • {_esc(opinion)}")
 
     lines.extend([
         "",
-        f"\U0001f4ac _{rec.reasoning}_",
+        f"\U0001f4ac <i>{_esc(rec.reasoning)}</i>",
         "",
         f"\U0001f552 {rec.generated_at.strftime('%Y-%m-%d %H:%M UTC')}",
     ])
@@ -88,7 +94,7 @@ async def send_telegram_alert(rec: FinalRecommendation, settings: Settings | Non
         response = await client.post(url, json={
             "chat_id": settings.telegram_chat_id,
             "text": message,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
         })
         return response.status_code == 200
