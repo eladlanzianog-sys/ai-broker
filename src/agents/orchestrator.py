@@ -6,6 +6,7 @@ Two node functions:
 """
 from src.agents.state import AnalysisState
 from src.services.cache import cache_recommendation, get_cached_recommendation
+from src.services.notifications import dispatch_alert
 from src.services.persistence import save_analysis_run
 
 
@@ -64,9 +65,20 @@ async def orchestrator_exit(state: AnalysisState) -> dict:
     except Exception:
         pass
 
+    alert_results = {}
+    try:
+        alert_results = await dispatch_alert(rec)
+    except Exception:
+        pass
+
+    alert_log = ""
+    if alert_results:
+        channels = ", ".join(f"{k}={'OK' if v else 'FAIL'}" for k, v in alert_results.items())
+        alert_log = f" | Alerts: {channels}"
+
     return {
         "audit_log": [
             f"[Orchestrator] Analysis complete for {rec.ticker}: "
-            f"{rec.action.value} (confidence={rec.confidence:.2f})"
+            f"{rec.action.value} (confidence={rec.confidence:.2f}){alert_log}"
         ],
     }
