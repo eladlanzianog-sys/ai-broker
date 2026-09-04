@@ -50,10 +50,12 @@ def _fetch_from_yfinance(ticker: str) -> list[NewsItem]:
     items = []
     for article in news[:20]:
         content = article.get("content", {})
+        pub_epoch = content.get("pubDate") or article.get("providerPublishTime")
+        pub_dt = datetime.fromtimestamp(pub_epoch) if pub_epoch else datetime.utcnow()
         items.append(NewsItem(
             title=content.get("title", article.get("title", "")),
             source=content.get("provider", {}).get("displayName", "Yahoo Finance"),
-            published_at=datetime.utcnow(),
+            published_at=pub_dt,
             url=content.get("canonicalUrl", {}).get("url", ""),
             summary=content.get("summary"),
         ))
