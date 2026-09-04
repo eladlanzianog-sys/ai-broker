@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     scan_minute: int = 0
     scan_only_actionable: bool = True
 
+    ibkr_host: str = "127.0.0.1"
+    ibkr_port: int = 7497
+    ibkr_client_id: int = 1
+    ibkr_trading_enabled: bool = False
+    ibkr_risk_per_trade: float = 1.0
+    ibkr_max_position_pct: float = 0.20
+    ibkr_reward_ratio: float = 2.0
+    ibkr_min_confidence: float = 0.5
+    ibkr_atr_multiplier: float = 1.5
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     def get_watchlist(self) -> list[str]:
