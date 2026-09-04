@@ -31,6 +31,8 @@ dev = [
 
 [project.scripts]
 analyze = "src.cli:main"
+scan = "src.scanner:main"
+scheduler = "src.scheduler:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
