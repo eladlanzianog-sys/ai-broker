@@ -1,20 +1,15 @@
-"""AI Broker Terminal -- Streamlit stock-trading dashboard.
+"""AI Broker — Trading Strategy Platform.
 
-Pulls live market data from yfinance, computes every technical indicator
-using the existing ``src/tools/`` modules, runs a deterministic weighted
-voting system identical to the LangGraph pipeline (minus the LLM call),
-and presents the result in a dark, RTL Hebrew interface.
+Enter a ticker, get a full trading strategy: Long/Short direction,
+entry zone, stop loss, take profit, position sizing — all with charts.
+Plus a daily "Hot 5" stocks list from the AI agents.
 """
-
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Make sure the project root is on sys.path so ``from src.…`` works when
-# Streamlit is launched from any directory.
-# ---------------------------------------------------------------------------
 _PROJECT_ROOT = str(Path(__file__).resolve().parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -61,8 +56,8 @@ from src.tools.technical_indicators import (
 # ===================================================================== #
 
 st.set_page_config(
-    page_title="AI Broker Terminal",
-    page_icon="\U0001F4C8",
+    page_title="AI Broker",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -73,22 +68,37 @@ st.set_page_config(
 
 _CSS = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
 :root {
-    --bg: #FAFBFC;
+    --bg: #F8F9FC;
     --panel: #FFFFFF;
-    --up: #16A34A;
-    --down: #DC2626;
-    --accent: #2563EB;
-    --text: #1E293B;
-    --text-dim: #64748B;
-    --border: #E2E8F0;
+    --panel-alt: #F1F3F9;
+    --up: #10B981;
+    --up-bg: #ECFDF5;
+    --down: #EF4444;
+    --down-bg: #FEF2F2;
+    --accent: #6366F1;
+    --accent-light: #EEF2FF;
+    --text: #111827;
+    --text-secondary: #6B7280;
+    --text-muted: #9CA3AF;
+    --border: #E5E7EB;
+    --border-light: #F3F4F6;
+    --gold: #F59E0B;
+    --gold-bg: #FFFBEB;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.03);
+    --radius: 12px;
+    --radius-sm: 8px;
 }
 
-/* Light professional background */
 html, body, [data-testid="stAppViewContainer"],
 [data-testid="stApp"], .main, .block-container {
     background-color: var(--bg) !important;
     color: var(--text) !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
 [data-testid="stSidebar"] {
@@ -96,166 +106,347 @@ html, body, [data-testid="stAppViewContainer"],
     border-left: 1px solid var(--border) !important;
 }
 
-[data-testid="stHeader"] {
-    background-color: var(--bg) !important;
-}
-
-/* RTL for Hebrew content */
-.rtl {
-    direction: rtl;
-    text-align: right;
-}
-
-/* Metric cards */
-.metric-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px 20px;
-    text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-}
-.metric-card .label {
-    font-size: 0.78rem;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-}
-.metric-card .value {
-    font-size: 1.45rem;
-    font-weight: 700;
-    color: var(--text);
-}
-.metric-card .delta-up   { color: var(--up); font-size: 0.85rem; }
-.metric-card .delta-down { color: var(--down); font-size: 0.85rem; }
-
-/* Signal badge */
-.signal-badge {
-    display: inline-block;
-    padding: 8px 28px;
-    border-radius: 6px;
-    font-size: 1.3rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-}
-.badge-strong-buy  { background: #15803D; color: #FFFFFF; }
-.badge-buy         { background: #16A34A; color: #FFFFFF; }
-.badge-hold        { background: #6B7280; color: #FFFFFF; }
-.badge-sell        { background: #DC2626; color: #FFFFFF; }
-.badge-strong-sell { background: #991B1B; color: #FFFFFF; }
-
-/* Risk badge */
-.risk-low      { background: #DCFCE7; color: #166534; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-.risk-moderate { background: #FEF3C7; color: #92400E; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-.risk-high     { background: #FEE2E2; color: #991B1B; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-.risk-extreme  { background: #991B1B; color: #FFFFFF; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-
-/* Agent card */
-.agent-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 18px 22px;
-    margin-bottom: 10px;
-    border-right: 4px solid var(--accent);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-}
-
-/* Calculator result */
-.calc-result {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-}
-
-/* Tab styling */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-    direction: rtl;
-}
-.stTabs [data-baseweb="tab"] {
-    font-size: 1rem;
-}
-
-/* Hide Streamlit default elements */
+[data-testid="stHeader"] { background-color: var(--bg) !important; }
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
+
+.rtl { direction: rtl; text-align: right; }
+
+/* ---- Strategy Card ---- */
+.strategy-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+}
+.strategy-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+}
+.strategy-card.long::before { background: linear-gradient(90deg, #10B981, #34D399); }
+.strategy-card.short::before { background: linear-gradient(90deg, #EF4444, #F87171); }
+.strategy-card.hold::before { background: linear-gradient(90deg, #6B7280, #9CA3AF); }
+
+/* ---- Direction Badge ---- */
+.direction-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 24px;
+    border-radius: 50px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.direction-long {
+    background: linear-gradient(135deg, #10B981, #059669);
+    color: white;
+}
+.direction-short {
+    background: linear-gradient(135deg, #EF4444, #DC2626);
+    color: white;
+}
+.direction-hold {
+    background: linear-gradient(135deg, #6B7280, #4B5563);
+    color: white;
+}
+
+/* ---- Level Card ---- */
+.level-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 20px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.level-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+.level-card .lbl {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+.level-card .val {
+    font-size: 1.4rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+.level-card .sub {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+.level-card.entry { border-top: 3px solid var(--accent); }
+.level-card.entry .val { color: var(--accent); }
+.level-card.sl { border-top: 3px solid var(--down); }
+.level-card.sl .val { color: var(--down); }
+.level-card.tp { border-top: 3px solid var(--up); }
+.level-card.tp .val { color: var(--up); }
+.level-card.rr { border-top: 3px solid var(--gold); }
+.level-card.rr .val { color: var(--gold); }
+
+/* ---- Agent Pill ---- */
+.agent-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 6px 16px;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+.agent-pill .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.dot-buy { background: var(--up); }
+.dot-sell { background: var(--down); }
+.dot-hold { background: var(--text-muted); }
+
+/* ---- Hot Stock Row ---- */
+.hot-row {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 20px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.hot-row:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+.hot-rank {
+    font-size: 1.8rem;
+    font-weight: 900;
+    color: var(--text-muted);
+    width: 48px;
+    text-align: center;
+}
+.hot-ticker {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--text);
+}
+.hot-name {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+.hot-signal {
+    padding: 4px 14px;
+    border-radius: 50px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: white;
+}
+.hot-signal.buy { background: var(--up); }
+.hot-signal.sell { background: var(--down); }
+.hot-conf {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* ---- Reasoning Box ---- */
+.reasoning-box {
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 20px;
+    direction: rtl;
+    text-align: right;
+    font-size: 0.88rem;
+    line-height: 1.7;
+    color: var(--text);
+}
+.reasoning-box .reason-title {
+    font-weight: 700;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+/* ---- Risk Badge ---- */
+.risk-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 50px;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.risk-low { background: #ECFDF5; color: #065F46; }
+.risk-moderate { background: #FFFBEB; color: #92400E; }
+.risk-high { background: #FEF2F2; color: #991B1B; }
+.risk-extreme { background: #991B1B; color: white; }
+
+/* ---- Tabs ---- */
+.stTabs [data-baseweb="tab-list"] { gap: 4px; direction: rtl; }
+.stTabs [data-baseweb="tab"] {
+    font-size: 0.92rem;
+    font-weight: 600;
+    border-radius: 8px 8px 0 0;
+}
+
+/* ---- Metric small ---- */
+.metric-sm {
+    text-align: center;
+    padding: 10px;
+}
+.metric-sm .m-lbl {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+}
+.metric-sm .m-val {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-top: 2px;
+}
+
+/* Header */
+.app-header {
+    text-align: center;
+    padding: 12px 0 24px;
+}
+.app-header h1 {
+    font-size: 1.8rem;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    margin: 0;
+}
+.app-header p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin: 4px 0 0;
+}
 </style>
 """
 
 st.markdown(_CSS, unsafe_allow_html=True)
 
 # ===================================================================== #
-#                     HELPER: plotly layout defaults                      #
+#                         PLOTLY DEFAULTS                                  #
 # ===================================================================== #
 
 _PLOTLY_LAYOUT = dict(
     template="plotly_white",
     paper_bgcolor="#FFFFFF",
-    plot_bgcolor="#FFFFFF",
-    font=dict(color="#1E293B"),
-    xaxis=dict(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1"),
-    yaxis=dict(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1"),
+    plot_bgcolor="#FAFBFC",
+    font=dict(color="#111827", family="Inter, sans-serif"),
+    xaxis=dict(gridcolor="#F3F4F6", zerolinecolor="#E5E7EB"),
+    yaxis=dict(gridcolor="#F3F4F6", zerolinecolor="#E5E7EB"),
     margin=dict(l=50, r=20, t=40, b=30),
-    legend=dict(bgcolor="rgba(255,255,255,0.8)"),
+    legend=dict(bgcolor="rgba(255,255,255,0.95)", bordercolor="#E5E7EB", borderwidth=1),
 )
+_UP = "#10B981"
+_DOWN = "#EF4444"
+_ACCENT = "#6366F1"
 
-_UP = "#16A34A"
-_DOWN = "#DC2626"
-_ACCENT = "#2563EB"
-
-
-def _apply_layout(fig: go.Figure, **overrides) -> go.Figure:
-    merged = {**_PLOTLY_LAYOUT, **overrides}
-    fig.update_layout(**merged)
+def _apply_layout(fig, **overrides):
+    fig.update_layout(**{**_PLOTLY_LAYOUT, **overrides})
     return fig
 
-
 # ===================================================================== #
-#                        DATA FETCHING                                    #
+#                         DATA FETCHING                                    #
 # ===================================================================== #
 
 _PERIOD_MAP = {"1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "2Y": "2y"}
 
-
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_data(ticker: str, period: str) -> tuple[pd.DataFrame | None, dict | None]:
-    """Return (ohlcv_df, info_dict).  Returns (None, None) on failure."""
+def fetch_data(ticker: str, period: str):
     try:
         tk = yf.Ticker(ticker)
         df = tk.history(period=_PERIOD_MAP.get(period, "1y"), auto_adjust=True)
         if df is None or df.empty:
             return None, None
-        # Normalise column names to lowercase
         df.columns = [c.lower() for c in df.columns]
         info = tk.info or {}
         return df, info
     except Exception:
         return None, None
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_hot_candidates():
+    tickers = ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA", "AMD", "NFLX", "CRM",
+               "AVGO", "ORCL", "ADBE", "INTC", "QCOM", "MU", "PLTR", "SOFI", "COIN", "MARA",
+               "JPM", "V", "MA", "BAC", "GS", "SQ", "PYPL", "SHOP", "SNOW", "UBER"]
+    results = []
+    for t in tickers:
+        try:
+            tk = yf.Ticker(t)
+            df = tk.history(period="6mo", auto_adjust=True)
+            if df is None or df.empty:
+                continue
+            df.columns = [c.lower() for c in df.columns]
+            info = tk.info or {}
+            close = df["close"]
+            tech_sig, tech_conf, tech_score, tech_reason = _compute_technical_signal(close, df)
+            fund_sig, fund_conf, fund_score, fund_reason = _compute_fundamental_signal(info)
+            risk_level, risk_metrics = _compute_risk(close)
+            action, total_conf, weighted_score, dissents = _build_recommendation(
+                tech_sig, tech_conf, fund_sig, fund_conf,
+                Signal.HOLD, 0.35, risk_level,
+            )
+            last_price = float(close.iloc[-1])
+            prev_price = float(close.iloc[-2]) if len(close) > 1 else last_price
+            change_pct = (last_price - prev_price) / prev_price * 100
+            name = info.get("shortName", t)
+            results.append({
+                "ticker": t, "name": name, "price": last_price,
+                "change_pct": change_pct, "action": action,
+                "confidence": total_conf, "score": weighted_score,
+                "risk": risk_level, "reasoning": tech_reason,
+            })
+        except Exception:
+            continue
+    results.sort(key=lambda x: abs(x["score"]) * x["confidence"], reverse=True)
+    return results[:5]
 
 # ===================================================================== #
-#                  INDICATOR SERIES (for charts)                          #
+#                     SERIES HELPERS (for charts)                          #
 # ===================================================================== #
 
-def _sma_series(s: pd.Series, period: int) -> pd.Series:
+def _sma_series(s, period):
     return s.rolling(window=period).mean()
 
-
-def _ema_series(s: pd.Series, span: int) -> pd.Series:
+def _ema_series(s, span):
     return s.ewm(span=span, adjust=False).mean()
 
-
-def _rsi_series(s: pd.Series, period: int = 14) -> pd.Series:
+def _rsi_series(s, period=14):
     delta = s.diff()
     gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
     rs = gain / loss
     return 100.0 - (100.0 / (1.0 + rs))
 
-
-def _macd_series(s: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+def _macd_series(s, fast=12, slow=26, signal=9):
     ef = s.ewm(span=fast, adjust=False).mean()
     es = s.ewm(span=slow, adjust=False).mean()
     ml = ef - es
@@ -263,39 +454,23 @@ def _macd_series(s: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
     mh = ml - ms
     return ml, ms, mh
 
+def _bollinger_series(s, period=20, std_dev=2.0):
+    mid = s.rolling(window=period).mean()
+    std = s.rolling(window=period).std()
+    return mid + std_dev * std, mid, mid - std_dev * std
 
-def _stochastic_series(df: pd.DataFrame, k_period: int = 14, d_period: int = 3):
-    low_min = df["low"].rolling(window=k_period).min()
-    high_max = df["high"].rolling(window=k_period).max()
-    denom = high_max - low_min
-    denom = denom.replace(0, np.nan)
-    k = 100.0 * (df["close"] - low_min) / denom
-    d = k.rolling(window=d_period).mean()
-    return k, d
-
-
-def _atr_series(df: pd.DataFrame, period: int = 14) -> pd.Series:
+def _atr_series(df, period=14):
     hl = df["high"] - df["low"]
     hc = (df["high"] - df["close"].shift()).abs()
     lc = (df["low"] - df["close"].shift()).abs()
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
     return tr.rolling(window=period).mean()
 
-
-def _bollinger_series(s: pd.Series, period: int = 20, std_dev: float = 2.0):
-    mid = s.rolling(window=period).mean()
-    std = s.rolling(window=period).std()
-    return mid + std_dev * std, mid, mid - std_dev * std
-
-
 # ===================================================================== #
-#                TECHNICAL SIGNAL SCORING (no LLM)                        #
+#                     SIGNAL SCORING                                       #
 # ===================================================================== #
 
-def compute_technical_signal(
-    close: pd.Series, df: pd.DataFrame
-) -> tuple[Signal, float, float, str]:
-    """Return (signal, confidence, raw_score, reasoning)."""
+def _compute_technical_signal(close, df):
     rsi = compute_rsi(close)
     macd = compute_macd(close)
     macd_hist = macd["macd_histogram"]
@@ -304,86 +479,57 @@ def compute_technical_signal(
     last_close = float(close.iloc[-1])
 
     score = 0.0
-    reasons: list[str] = []
+    reasons = []
 
-    # RSI
     if rsi is not None:
         if rsi < 30:
-            score += 0.3
-            reasons.append(f"RSI oversold ({rsi:.1f})")
+            score += 0.3; reasons.append(f"RSI oversold ({rsi:.1f})")
         elif rsi < 45:
-            score += 0.1
-            reasons.append(f"RSI leaning bullish ({rsi:.1f})")
+            score += 0.1; reasons.append(f"RSI bullish ({rsi:.1f})")
         elif rsi > 70:
-            score -= 0.3
-            reasons.append(f"RSI overbought ({rsi:.1f})")
+            score -= 0.3; reasons.append(f"RSI overbought ({rsi:.1f})")
         elif rsi > 55:
-            score -= 0.1
-            reasons.append(f"RSI leaning bearish ({rsi:.1f})")
+            score -= 0.1; reasons.append(f"RSI bearish ({rsi:.1f})")
 
-    # MACD histogram
     if macd_hist is not None:
         if macd_hist > 0:
-            score += 0.2
-            reasons.append("MACD histogram positive")
+            score += 0.2; reasons.append("MACD חיובי")
         else:
-            score -= 0.2
-            reasons.append("MACD histogram negative")
+            score -= 0.2; reasons.append("MACD שלילי")
 
-    # Price vs SMA 50
     if sma50 is not None:
         if last_close > sma50:
-            score += 0.2
-            reasons.append("Price above SMA50")
+            score += 0.2; reasons.append("מעל SMA50")
         else:
-            score -= 0.2
-            reasons.append("Price below SMA50")
+            score -= 0.2; reasons.append("מתחת SMA50")
 
-    # Price vs SMA 200
     if sma200 is not None:
         if last_close > sma200:
-            score += 0.1
-            reasons.append("Price above SMA200")
+            score += 0.1; reasons.append("מעל SMA200")
         else:
-            score -= 0.1
-            reasons.append("Price below SMA200")
+            score -= 0.1; reasons.append("מתחת SMA200")
 
-    # Patterns
     patterns = detect_patterns(df)
     if "golden_cross" in patterns:
-        score += 0.15
-        reasons.append("Golden cross detected")
+        score += 0.15; reasons.append("Golden Cross")
     if "death_cross" in patterns:
-        score -= 0.15
-        reasons.append("Death cross detected")
+        score -= 0.15; reasons.append("Death Cross")
 
     confidence = min(1.0, max(0.3, 0.5 + abs(score)))
 
-    if score > 0.4:
-        signal = Signal.STRONG_BUY
-    elif score > 0.15:
-        signal = Signal.BUY
-    elif score < -0.4:
-        signal = Signal.STRONG_SELL
-    elif score < -0.15:
-        signal = Signal.SELL
-    else:
-        signal = Signal.HOLD
+    if score > 0.4: signal = Signal.STRONG_BUY
+    elif score > 0.15: signal = Signal.BUY
+    elif score < -0.4: signal = Signal.STRONG_SELL
+    elif score < -0.15: signal = Signal.SELL
+    else: signal = Signal.HOLD
 
-    reasoning = "; ".join(reasons) if reasons else "No clear signals"
+    reasoning = " · ".join(reasons) if reasons else "אין אותות ברורים"
     return signal, confidence, score, reasoning
 
 
-# ===================================================================== #
-#               FUNDAMENTAL SIGNAL SCORING (no LLM)                       #
-# ===================================================================== #
-
-def compute_fundamental_signal(
-    info: dict,
-) -> tuple[Signal, float, float, str]:
-    """Compute a simple fundamental score from yfinance .info dict."""
+def _compute_fundamental_signal(info):
     score = 0.0
-    reasons: list[str] = []
+    reasons = []
 
     pe = info.get("trailingPE") or info.get("forwardPE")
     de = info.get("debtToEquity")
@@ -392,1002 +538,566 @@ def compute_fundamental_signal(
     profit_margin = info.get("profitMargins")
     current_ratio = info.get("currentRatio")
 
-    # PE ratio
     if pe is not None:
-        if pe < 0:
-            score -= 0.15
-            reasons.append(f"Negative P/E ({pe:.1f})")
-        elif pe < 15:
-            score += 0.2
-            reasons.append(f"Low P/E ({pe:.1f})")
-        elif pe < 25:
-            score += 0.05
-            reasons.append(f"Moderate P/E ({pe:.1f})")
-        elif pe < 40:
-            score -= 0.05
-            reasons.append(f"High P/E ({pe:.1f})")
-        else:
-            score -= 0.15
-            reasons.append(f"Very high P/E ({pe:.1f})")
-    else:
-        reasons.append("P/E unavailable")
+        if pe < 0: score -= 0.15; reasons.append(f"P/E שלילי ({pe:.1f})")
+        elif pe < 15: score += 0.2; reasons.append(f"P/E נמוך ({pe:.1f})")
+        elif pe < 25: score += 0.05
+        elif pe < 40: score -= 0.05; reasons.append(f"P/E גבוה ({pe:.1f})")
+        else: score -= 0.15; reasons.append(f"P/E מאוד גבוה ({pe:.1f})")
 
-    # Debt-to-equity
     if de is not None:
-        de_ratio = de / 100.0 if de > 10 else de  # yfinance sometimes returns %
-        if de_ratio < 0.5:
-            score += 0.15
-            reasons.append(f"Low debt/equity ({de_ratio:.2f})")
-        elif de_ratio < 1.0:
-            score += 0.05
-            reasons.append(f"Moderate debt/equity ({de_ratio:.2f})")
-        elif de_ratio < 2.0:
-            score -= 0.05
-            reasons.append(f"High debt/equity ({de_ratio:.2f})")
-        else:
-            score -= 0.15
-            reasons.append(f"Very high debt/equity ({de_ratio:.2f})")
+        de_r = de / 100.0 if de > 10 else de
+        if de_r < 0.5: score += 0.15; reasons.append(f"חוב נמוך ({de_r:.2f})")
+        elif de_r < 1.0: score += 0.05
+        elif de_r < 2.0: score -= 0.05
+        else: score -= 0.15; reasons.append(f"חוב גבוה ({de_r:.2f})")
 
-    # ROE
     if roe is not None:
-        if roe > 0.20:
-            score += 0.2
-            reasons.append(f"Strong ROE ({roe:.1%})")
-        elif roe > 0.10:
-            score += 0.1
-            reasons.append(f"Good ROE ({roe:.1%})")
-        elif roe > 0:
-            score += 0.0
-            reasons.append(f"Weak ROE ({roe:.1%})")
-        else:
-            score -= 0.15
-            reasons.append(f"Negative ROE ({roe:.1%})")
+        if roe > 0.20: score += 0.2; reasons.append(f"ROE חזק ({roe:.1%})")
+        elif roe > 0.10: score += 0.1
+        elif roe <= 0: score -= 0.15; reasons.append(f"ROE שלילי ({roe:.1%})")
 
-    # Revenue growth
     if rev_growth is not None:
-        if rev_growth > 0.20:
-            score += 0.15
-            reasons.append(f"Strong revenue growth ({rev_growth:.1%})")
-        elif rev_growth > 0.05:
-            score += 0.05
-            reasons.append(f"Moderate revenue growth ({rev_growth:.1%})")
-        elif rev_growth > -0.05:
-            score += 0.0
-            reasons.append(f"Flat revenue ({rev_growth:.1%})")
-        else:
-            score -= 0.15
-            reasons.append(f"Revenue declining ({rev_growth:.1%})")
+        if rev_growth > 0.20: score += 0.15; reasons.append(f"צמיחה חזקה ({rev_growth:.1%})")
+        elif rev_growth > 0.05: score += 0.05
+        elif rev_growth < -0.05: score -= 0.15; reasons.append(f"הכנסות יורדות ({rev_growth:.1%})")
 
-    # Profit margin
     if profit_margin is not None:
-        if profit_margin > 0.20:
-            score += 0.1
-            reasons.append(f"High profit margin ({profit_margin:.1%})")
-        elif profit_margin > 0.05:
-            score += 0.0
-        elif profit_margin > 0:
-            score -= 0.05
-            reasons.append(f"Thin margin ({profit_margin:.1%})")
-        else:
-            score -= 0.1
-            reasons.append(f"Negative margin ({profit_margin:.1%})")
+        if profit_margin > 0.20: score += 0.1; reasons.append(f"מרווח גבוה ({profit_margin:.1%})")
+        elif profit_margin < 0: score -= 0.1; reasons.append(f"מרווח שלילי ({profit_margin:.1%})")
 
-    # Current ratio
     if current_ratio is not None:
-        if current_ratio > 1.5:
-            score += 0.05
-        elif current_ratio < 1.0:
-            score -= 0.1
-            reasons.append(f"Low current ratio ({current_ratio:.2f})")
+        if current_ratio > 1.5: score += 0.05
+        elif current_ratio < 1.0: score -= 0.1
 
     confidence = min(1.0, max(0.3, 0.45 + abs(score)))
+    if score > 0.4: signal = Signal.STRONG_BUY
+    elif score > 0.15: signal = Signal.BUY
+    elif score < -0.4: signal = Signal.STRONG_SELL
+    elif score < -0.15: signal = Signal.SELL
+    else: signal = Signal.HOLD
 
-    if score > 0.4:
-        signal = Signal.STRONG_BUY
-    elif score > 0.15:
-        signal = Signal.BUY
-    elif score < -0.4:
-        signal = Signal.STRONG_SELL
-    elif score < -0.15:
-        signal = Signal.SELL
-    else:
-        signal = Signal.HOLD
-
-    reasoning = "; ".join(reasons) if reasons else "Insufficient fundamental data"
+    reasoning = " · ".join(reasons) if reasons else "אין מספיק נתונים"
     return signal, confidence, score, reasoning
 
 
-# ===================================================================== #
-#                SENTIMENT PLACEHOLDER                                    #
-# ===================================================================== #
-
-def compute_sentiment_signal() -> tuple[Signal, float, float, str]:
-    """Placeholder -- no free news API available."""
-    return Signal.HOLD, 0.35, 0.0, "לא זמין – אין API חדשות"
-
-
-# ===================================================================== #
-#                   RISK ASSESSMENT                                       #
-# ===================================================================== #
-
-def compute_risk(close: pd.Series) -> tuple[RiskLevel, dict]:
+def _compute_risk(close):
     vol_pct = compute_volatility_percentile(close)
     var95 = compute_var_95(close)
     mdd = compute_max_drawdown(close)
     sharpe = compute_sharpe_ratio(close)
 
     flags = []
-    if vol_pct >= VOLATILITY_EXTREME_THRESHOLD:
-        flags.append("Extreme volatility")
-    if mdd is not None and mdd <= MAX_DRAWDOWN_SEVERE_THRESHOLD:
-        flags.append("Severe drawdown")
+    if vol_pct >= VOLATILITY_EXTREME_THRESHOLD: flags.append("תנודתיות קיצונית")
+    if mdd is not None and mdd <= MAX_DRAWDOWN_SEVERE_THRESHOLD: flags.append("ירידה חריפה")
 
-    if vol_pct >= 0.9 or (mdd is not None and mdd <= -0.30):
-        level = RiskLevel.EXTREME
-    elif vol_pct >= 0.7 or (mdd is not None and mdd <= -0.20):
-        level = RiskLevel.HIGH
-    elif vol_pct >= 0.4:
-        level = RiskLevel.MODERATE
-    else:
-        level = RiskLevel.LOW
+    if vol_pct >= 0.9 or (mdd is not None and mdd <= -0.30): level = RiskLevel.EXTREME
+    elif vol_pct >= 0.7 or (mdd is not None and mdd <= -0.20): level = RiskLevel.HIGH
+    elif vol_pct >= 0.4: level = RiskLevel.MODERATE
+    else: level = RiskLevel.LOW
 
-    metrics = {
-        "volatility_percentile": vol_pct,
-        "var_95": var95,
-        "max_drawdown": mdd,
-        "sharpe_ratio": sharpe,
-        "flags": flags,
-    }
-    return level, metrics
+    return level, {"volatility_percentile": vol_pct, "var_95": var95,
+                   "max_drawdown": mdd, "sharpe_ratio": sharpe, "flags": flags}
 
 
-# ===================================================================== #
-#                FINAL RECOMMENDATION (replicate strategist)              #
-# ===================================================================== #
-
-_SIGNAL_LABEL = {
-    Signal.STRONG_BUY: "קנייה חזקה",
-    Signal.BUY: "קנייה",
-    Signal.HOLD: "המתנה",
-    Signal.SELL: "מכירה",
-    Signal.STRONG_SELL: "מכירה חזקה",
-}
-
-_SIGNAL_BADGE_CLASS = {
-    Signal.STRONG_BUY: "badge-strong-buy",
-    Signal.BUY: "badge-buy",
-    Signal.HOLD: "badge-hold",
-    Signal.SELL: "badge-sell",
-    Signal.STRONG_SELL: "badge-strong-sell",
-}
-
-_RISK_LABEL = {
-    RiskLevel.LOW: "נמוך",
-    RiskLevel.MODERATE: "מתון",
-    RiskLevel.HIGH: "גבוה",
-    RiskLevel.EXTREME: "קיצוני",
-}
-
-_RISK_BADGE_CLASS = {
-    RiskLevel.LOW: "risk-low",
-    RiskLevel.MODERATE: "risk-moderate",
-    RiskLevel.HIGH: "risk-high",
-    RiskLevel.EXTREME: "risk-extreme",
-}
-
-
-def build_recommendation(
-    tech_signal: Signal,
-    tech_conf: float,
-    fund_signal: Signal,
-    fund_conf: float,
-    sent_signal: Signal,
-    sent_conf: float,
-    risk_level: RiskLevel,
-) -> tuple[Signal, float, float, list[str]]:
-    tech_score = SIGNAL_TO_SCORE[tech_signal] * tech_conf
-    fund_score = SIGNAL_TO_SCORE[fund_signal] * fund_conf
-    sent_score = SIGNAL_TO_SCORE[sent_signal] * sent_conf
-
-    raw_score = (
-        tech_score * TECHNICAL_WEIGHT
-        + fund_score * FUNDAMENTAL_WEIGHT
-        + sent_score * SENTIMENT_WEIGHT
-    )
-
+def _build_recommendation(tech_sig, tech_conf, fund_sig, fund_conf,
+                          sent_sig, sent_conf, risk_level):
+    tech_score = SIGNAL_TO_SCORE[tech_sig] * tech_conf
+    fund_score = SIGNAL_TO_SCORE[fund_sig] * fund_conf
+    sent_score = SIGNAL_TO_SCORE[sent_sig] * sent_conf
+    raw = tech_score * TECHNICAL_WEIGHT + fund_score * FUNDAMENTAL_WEIGHT + sent_score * SENTIMENT_WEIGHT
     dampening = RISK_DAMPENING[risk_level]
-    adjusted = raw_score * dampening
+    adjusted = raw * dampening
 
-    if adjusted >= SCORE_THRESHOLDS["strong_buy"]:
-        action = Signal.STRONG_BUY
-    elif adjusted >= SCORE_THRESHOLDS["buy"]:
-        action = Signal.BUY
-    elif adjusted <= SCORE_THRESHOLDS["strong_sell"]:
-        action = Signal.STRONG_SELL
-    elif adjusted <= SCORE_THRESHOLDS["sell"]:
-        action = Signal.SELL
-    else:
-        action = Signal.HOLD
+    if adjusted >= SCORE_THRESHOLDS["strong_buy"]: action = Signal.STRONG_BUY
+    elif adjusted >= SCORE_THRESHOLDS["buy"]: action = Signal.BUY
+    elif adjusted <= SCORE_THRESHOLDS["strong_sell"]: action = Signal.STRONG_SELL
+    elif adjusted <= SCORE_THRESHOLDS["sell"]: action = Signal.SELL
+    else: action = Signal.HOLD
 
-    total_conf = (
-        tech_conf * TECHNICAL_WEIGHT
-        + fund_conf * FUNDAMENTAL_WEIGHT
-        + sent_conf * SENTIMENT_WEIGHT
-    ) * dampening
+    total_conf = (tech_conf * TECHNICAL_WEIGHT + fund_conf * FUNDAMENTAL_WEIGHT + sent_conf * SENTIMENT_WEIGHT) * dampening
 
-    dissents: list[str] = []
-    if tech_signal != action:
-        dissents.append(
-            f"טכני: {_SIGNAL_LABEL[tech_signal]} "
-            f"(ביטחון {tech_conf:.0%})"
-        )
-    if fund_signal != action:
-        dissents.append(
-            f"פונדמנטלי: {_SIGNAL_LABEL[fund_signal]} "
-            f"(ביטחון {fund_conf:.0%})"
-        )
-    if sent_signal != action:
-        dissents.append(
-            f"סנטימנט: {_SIGNAL_LABEL[sent_signal]} "
-            f"(בטחון {sent_conf:.0%})"
-        )
+    _SIG_LBL = {Signal.STRONG_BUY: "קנייה חזקה", Signal.BUY: "קנייה", Signal.HOLD: "המתנה",
+                Signal.SELL: "מכירה", Signal.STRONG_SELL: "מכירה חזקה"}
+    dissents = []
+    if tech_sig != action:
+        dissents.append(f"טכני: {_SIG_LBL[tech_sig]} ({tech_conf:.0%})")
+    if fund_sig != action:
+        dissents.append(f"פונדמנטלי: {_SIG_LBL[fund_sig]} ({fund_conf:.0%})")
 
     return action, total_conf, adjusted, dissents
 
 
 # ===================================================================== #
-#                        METRIC CARD helper                               #
+#              STRATEGY BUILDER                                            #
 # ===================================================================== #
 
-def _metric_html(label: str, value: str, delta: str = "", delta_up: bool = True) -> str:
-    delta_cls = "delta-up" if delta_up else "delta-down"
-    delta_block = f'<div class="{delta_cls}">{delta}</div>' if delta else ""
-    return (
-        f'<div class="metric-card">'
-        f'<div class="label">{label}</div>'
-        f'<div class="value">{value}</div>'
-        f'{delta_block}'
-        f'</div>'
-    )
+def build_strategy(action, close, df, info, atr_val, support, resistance, risk_level, atr_mult=2.0, reward_ratio=2.0):
+    last_price = float(close.iloc[-1])
+
+    is_long = action in (Signal.STRONG_BUY, Signal.BUY)
+    is_short = action in (Signal.STRONG_SELL, Signal.SELL)
+
+    if is_long:
+        direction = "LONG"
+        entry = last_price
+        if atr_val and atr_val > 0:
+            sl = round(entry - atr_val * atr_mult, 2)
+        else:
+            sl = round(entry * 0.97, 2)
+        r = entry - sl
+        tp = round(entry + r * reward_ratio, 2)
+        tp2 = round(entry + r * (reward_ratio * 1.5), 2)
+        entry_zone_low = round(entry * 0.995, 2)
+        entry_zone_high = round(entry * 1.005, 2)
+    elif is_short:
+        direction = "SHORT"
+        entry = last_price
+        if atr_val and atr_val > 0:
+            sl = round(entry + atr_val * atr_mult, 2)
+        else:
+            sl = round(entry * 1.03, 2)
+        r = sl - entry
+        tp = round(entry - r * reward_ratio, 2)
+        tp2 = round(entry - r * (reward_ratio * 1.5), 2)
+        entry_zone_low = round(entry * 0.995, 2)
+        entry_zone_high = round(entry * 1.005, 2)
+    else:
+        direction = "HOLD"
+        entry = last_price
+        sl = round(entry * 0.97, 2)
+        tp = round(entry * 1.04, 2)
+        tp2 = round(entry * 1.06, 2)
+        entry_zone_low = round(entry * 0.99, 2)
+        entry_zone_high = round(entry * 1.01, 2)
+        r = abs(entry - sl)
+
+    risk_dollars_per_share = abs(entry - sl)
+    rr = reward_ratio if r > 0 else 0
+
+    if support and is_long and sl > support:
+        sl = round(support * 0.995, 2)
+    if resistance and is_short and sl < resistance:
+        sl = round(resistance * 1.005, 2)
+
+    return {
+        "direction": direction,
+        "entry": entry,
+        "entry_zone": (entry_zone_low, entry_zone_high),
+        "stop_loss": sl,
+        "take_profit_1": tp,
+        "take_profit_2": tp2,
+        "risk_per_share": risk_dollars_per_share,
+        "reward_ratio": rr,
+        "atr": atr_val,
+    }
 
 
-def _fmt_big_number(n: float | None) -> str:
-    if n is None:
-        return "N/A"
-    if abs(n) >= 1e12:
-        return f"${n / 1e12:.2f}T"
-    if abs(n) >= 1e9:
-        return f"${n / 1e9:.2f}B"
-    if abs(n) >= 1e6:
-        return f"${n / 1e6:.1f}M"
+def _fmt_big(n):
+    if n is None: return "N/A"
+    if abs(n) >= 1e12: return f"${n/1e12:.2f}T"
+    if abs(n) >= 1e9: return f"${n/1e9:.2f}B"
+    if abs(n) >= 1e6: return f"${n/1e6:.1f}M"
     return f"${n:,.0f}"
 
 
+_SIGNAL_LABEL = {
+    Signal.STRONG_BUY: "קנייה חזקה", Signal.BUY: "קנייה", Signal.HOLD: "המתנה",
+    Signal.SELL: "מכירה", Signal.STRONG_SELL: "מכירה חזקה",
+}
+_RISK_LABEL = {
+    RiskLevel.LOW: "נמוך", RiskLevel.MODERATE: "מתון",
+    RiskLevel.HIGH: "גבוה", RiskLevel.EXTREME: "קיצוני",
+}
+_RISK_CLASS = {
+    RiskLevel.LOW: "risk-low", RiskLevel.MODERATE: "risk-moderate",
+    RiskLevel.HIGH: "risk-high", RiskLevel.EXTREME: "risk-extreme",
+}
+
 # ===================================================================== #
-#                           SIDEBAR                                       #
+#                        SIDEBAR                                           #
 # ===================================================================== #
 
 with st.sidebar:
-    st.markdown(
-        '<h2 class="rtl">\U0001F4C8 AI Broker Terminal</h2>',
-        unsafe_allow_html=True,
-    )
+    st.markdown("""
+    <div style="text-align:center; padding: 8px 0 16px;">
+        <div style="font-size:2rem;">🤖</div>
+        <div style="font-size:1.1rem; font-weight:800; letter-spacing:-0.3px;">AI Broker</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); font-weight:500;">Trading Strategy Platform</div>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("---")
 
-    ticker = st.text_input(
-        "סימול מניה",
-        value="AAPL",
-        help="e.g. AAPL, MSFT, TSLA, AMZN",
-    ).upper().strip()
+    ticker = st.text_input("סימול מניה", value="NVDA",
+                           help="e.g. AAPL, MSFT, TSLA, NVDA").upper().strip()
+    timeframe = st.selectbox("טווח זמן", options=["3M", "6M", "1Y", "2Y"], index=2)
 
-    timeframe = st.selectbox(
-        "טווח זמן",
-        options=["1M", "3M", "6M", "1Y", "2Y"],
-        index=3,
-    )
+    st.markdown("---")
+    st.markdown('<p style="font-weight:700; font-size:0.82rem; color:var(--text-secondary);">⚙️ הגדרות אסטרטגיה</p>', unsafe_allow_html=True)
 
-    refresh = st.button("\U0001F504 רענן נתונים", use_container_width=True)
-    if refresh:
+    account_size = st.number_input("גודל חשבון ($)", min_value=1000, max_value=10_000_000, value=100_000, step=1000)
+    risk_pct = st.slider("סיכון לעסקה (%)", min_value=0.25, max_value=5.0, value=1.0, step=0.25)
+    reward_ratio = st.select_slider("יחס R:R", options=[1.5, 2.0, 2.5, 3.0, 4.0], value=2.0)
+    atr_multiplier = st.slider("ATR מכפיל (SL)", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+
+    st.markdown("---")
+    if st.button("🔄 רענן", use_container_width=True):
         st.cache_data.clear()
 
-    st.markdown("---")
-    st.markdown('<p class="rtl" style="font-weight:600;">⚙️ הגדרות</p>', unsafe_allow_html=True)
+# ===================================================================== #
+#                         MAIN PAGE                                        #
+# ===================================================================== #
 
-    account_size = st.number_input(
-        "גודל חשבון ($)",
-        min_value=1000,
-        max_value=100_000_000,
-        value=100_000,
-        step=1000,
+tab_strategy, tab_hot5 = st.tabs(["📊 אסטרטגיית מסחר", "🔥 5 מניות חמות"])
+
+# ===================================================================== #
+# TAB 1 — STRATEGY                                                        #
+# ===================================================================== #
+
+with tab_strategy:
+    with st.spinner("מנתח..."):
+        df, info = fetch_data(ticker, timeframe)
+
+    if df is None or info is None:
+        st.error(f"לא ניתן לטעון נתונים עבור **{ticker}**. בדוק את הסימול.")
+        st.stop()
+
+    close = df["close"]
+    last_price = float(close.iloc[-1])
+    prev_price = float(close.iloc[-2]) if len(close) > 1 else last_price
+    change_pct = (last_price - prev_price) / prev_price * 100
+
+    rsi_val = compute_rsi(close)
+    macd_vals = compute_macd(close)
+    atr_val = compute_atr(df)
+    boll_vals = compute_bollinger_bands(close)
+    support, resistance = identify_support_resistance(df)
+    patterns = detect_patterns(df)
+
+    tech_sig, tech_conf, tech_score, tech_reason = _compute_technical_signal(close, df)
+    fund_sig, fund_conf, fund_score, fund_reason = _compute_fundamental_signal(info)
+    risk_level, risk_metrics = _compute_risk(close)
+    action, total_conf, weighted_score, dissents = _build_recommendation(
+        tech_sig, tech_conf, fund_sig, fund_conf, Signal.HOLD, 0.35, risk_level,
     )
-    risk_pct = st.slider(
-        "סיכון לעסקה (%)",
-        min_value=0.25,
-        max_value=5.0,
-        value=1.0,
-        step=0.25,
-    )
-    reward_ratio = st.selectbox(
-        "יחס סיכון/תגמול",
-        options=["1:1.5", "1:2", "1:3", "1:4"],
-        index=1,
-    )
-    atr_multiplier = st.slider(
-        "ATR Multiplier (Stop Loss)",
-        min_value=0.5,
-        max_value=5.0,
-        value=2.0,
-        step=0.5,
-    )
 
-# ===================================================================== #
-#                         MAIN AREA                                       #
-# ===================================================================== #
+    strat = build_strategy(action, close, df, info, atr_val, support, resistance,
+                           risk_level, atr_multiplier, reward_ratio)
 
-st.markdown(
-    f'<h1 class="rtl" style="margin-bottom:0;">{ticker} – טרמינל AI</h1>',
-    unsafe_allow_html=True,
-)
+    # ---- Header ----
+    company_name = info.get("shortName", ticker)
+    change_sign = "+" if change_pct >= 0 else ""
+    change_color = _UP if change_pct >= 0 else _DOWN
 
-with st.spinner("טוען נתונים..."):
-    df, info = fetch_data(ticker, timeframe)
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; direction:rtl;">
+        <div>
+            <span style="font-size:2rem; font-weight:900; letter-spacing:-0.5px;">{ticker}</span>
+            <span style="font-size:0.92rem; color:var(--text-secondary); margin-right:12px;">{company_name}</span>
+        </div>
+        <div style="text-align:left;">
+            <span style="font-size:1.8rem; font-weight:800;">${last_price:,.2f}</span>
+            <span style="font-size:0.92rem; font-weight:600; color:{change_color}; margin-left:8px;">{change_sign}{change_pct:.2f}%</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-if df is None or info is None:
-    st.error(
-        f"לא ניתן לטעון נתונים עבור **{ticker}**. "
-        "בדוק את הסימול ונסה שוב."
-    )
-    st.stop()
+    # ---- Direction Badge ----
+    dir_class = "long" if strat["direction"] == "LONG" else ("short" if strat["direction"] == "SHORT" else "hold")
+    dir_label = {"LONG": "↑ LONG — קנייה", "SHORT": "↓ SHORT — מכירה", "HOLD": "◆ HOLD — המתנה"}
+    dir_icon = {"LONG": "🟢", "SHORT": "🔴", "HOLD": "🟡"}
 
-close = df["close"]
-last_close = float(close.iloc[-1])
-
-# ===================================================================== #
-#                      COMPUTE ALL INDICATORS                             #
-# ===================================================================== #
-
-# Scalar indicators (using existing src/tools functions)
-rsi_val = compute_rsi(close)
-macd_vals = compute_macd(close)
-boll_vals = compute_bollinger_bands(close)
-atr_val = compute_atr(df)
-obv_val = compute_obv(df)
-stoch_vals = compute_stochastic(df)
-sma20_val = compute_sma(close, 20)
-sma50_val = compute_sma(close, 50)
-sma200_val = compute_sma(close, 200)
-ema12_val = compute_ema(close, 12)
-ema26_val = compute_ema(close, 26)
-support, resistance = identify_support_resistance(df)
-patterns = detect_patterns(df)
-
-# Signals
-tech_signal, tech_conf, tech_raw_score, tech_reasoning = compute_technical_signal(close, df)
-fund_signal, fund_conf, fund_raw_score, fund_reasoning = compute_fundamental_signal(info)
-sent_signal, sent_conf, sent_raw_score, sent_reasoning = compute_sentiment_signal()
-
-# Risk
-risk_level, risk_metrics = compute_risk(close)
-
-# Final
-action, total_conf, weighted_score, dissents = build_recommendation(
-    tech_signal, tech_conf,
-    fund_signal, fund_conf,
-    sent_signal, sent_conf,
-    risk_level,
-)
-
-# ===================================================================== #
-#                              TABS                                       #
-# ===================================================================== #
-
-tab_overview, tab_indicators, tab_ai, tab_calc = st.tabs([
-    "\U0001F4CA סקירה",
-    "\U0001F4C9 אינדיקטורים",
-    "\U0001F916 אות AI",
-    "\U0001F5A9 מחשבון",
-])
-
-# ===================================================================== #
-# TAB 1 -- Overview                                                       #
-# ===================================================================== #
-
-with tab_overview:
-    # --- Metric cards ---
-    prev_close = float(close.iloc[-2]) if len(close) > 1 else last_close
-    change_pct = (last_close - prev_close) / prev_close * 100 if prev_close else 0
-    change_abs = last_close - prev_close
-    is_up = change_pct >= 0
-    last_vol = int(df["volume"].iloc[-1]) if "volume" in df.columns else 0
-    w52_high = info.get("fiftyTwoWeekHigh", df["high"].max())
-    w52_low = info.get("fiftyTwoWeekLow", df["low"].min())
-    market_cap = info.get("marketCap")
-
-    cols = st.columns(5)
-    with cols[0]:
-        st.markdown(
-            _metric_html(
-                "מחיר נוכחי",
-                f"${last_close:,.2f}",
-                f"{'+'if is_up else ''}{change_abs:,.2f} ({change_pct:+.2f}%)",
-                is_up,
-            ),
-            unsafe_allow_html=True,
-        )
-    with cols[1]:
-        st.markdown(
-            _metric_html(
-                "שינוי %",
-                f"{change_pct:+.2f}%",
-                "",
-                is_up,
-            ),
-            unsafe_allow_html=True,
-        )
-    with cols[2]:
-        st.markdown(
-            _metric_html("מחזור", f"{last_vol:,}"),
-            unsafe_allow_html=True,
-        )
-    with cols[3]:
-        st.markdown(
-            _metric_html(
-                "52W Range",
-                f"${w52_low:,.2f} – ${w52_high:,.2f}",
-            ),
-            unsafe_allow_html=True,
-        )
-    with cols[4]:
-        st.markdown(
-            _metric_html("שווי שוק", _fmt_big_number(market_cap)),
-            unsafe_allow_html=True,
-        )
+    st.markdown(f"""
+    <div class="strategy-card {dir_class}">
+        <div style="display:flex; align-items:center; justify-content:space-between; direction:rtl;">
+            <div>
+                <div style="font-size:0.72rem; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); margin-bottom:8px;">אסטרטגיה מומלצת</div>
+                <span class="direction-badge direction-{dir_class}">{dir_icon[strat['direction']]} {dir_label[strat['direction']]}</span>
+                <span class="risk-pill {_RISK_CLASS[risk_level]}" style="margin-right:12px;">סיכון: {_RISK_LABEL[risk_level]}</span>
+            </div>
+            <div style="text-align:left;">
+                <div style="font-size:0.72rem; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted);">ביטחון</div>
+                <div style="font-size:2.2rem; font-weight:900; color:var(--accent);">{total_conf:.0%}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("")
 
-    # --- Candlestick chart ---
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        row_heights=[0.75, 0.25],
-        vertical_spacing=0.03,
-    )
+    # ---- Price Levels ----
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""
+        <div class="level-card entry">
+            <div class="lbl">כניסה</div>
+            <div class="val">${strat['entry']:,.2f}</div>
+            <div class="sub">${strat['entry_zone'][0]:,.2f} – ${strat['entry_zone'][1]:,.2f}</div>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="level-card sl">
+            <div class="lbl">Stop Loss</div>
+            <div class="val">${strat['stop_loss']:,.2f}</div>
+            <div class="sub">סיכון ${strat['risk_per_share']:,.2f} למניה</div>
+        </div>""", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="level-card tp">
+            <div class="lbl">Take Profit</div>
+            <div class="val">${strat['take_profit_1']:,.2f}</div>
+            <div class="sub">TP2: ${strat['take_profit_2']:,.2f}</div>
+        </div>""", unsafe_allow_html=True)
+    with c4:
+        risk_dollars = account_size * (risk_pct / 100)
+        shares = int(risk_dollars / strat["risk_per_share"]) if strat["risk_per_share"] > 0 else 0
+        st.markdown(f"""
+        <div class="level-card rr">
+            <div class="lbl">R:R & גודל פוזיציה</div>
+            <div class="val">1:{strat['reward_ratio']:.1f}</div>
+            <div class="sub">{shares:,} מניות · ${shares * strat['entry']:,.0f}</div>
+        </div>""", unsafe_allow_html=True)
 
-    # Candlesticks
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,
-            open=df["open"],
-            high=df["high"],
-            low=df["low"],
-            close=df["close"],
-            increasing_line_color=_UP,
-            decreasing_line_color=_DOWN,
-            increasing_fillcolor=_UP,
-            decreasing_fillcolor=_DOWN,
-            name="OHLC",
-            showlegend=False,
-        ),
-        row=1,
-        col=1,
-    )
+    st.markdown("")
 
-    # SMA lines
+    # ---- Strategy Chart ----
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.78, 0.22], vertical_spacing=0.03)
+
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["open"], high=df["high"], low=df["low"], close=df["close"],
+        increasing_line_color=_UP, decreasing_line_color=_DOWN,
+        increasing_fillcolor=_UP, decreasing_fillcolor=_DOWN,
+        name="OHLC", showlegend=False,
+    ), row=1, col=1)
+
     sma20s = _sma_series(close, 20)
     sma50s = _sma_series(close, 50)
-    sma200s = _sma_series(close, 200)
+    fig.add_trace(go.Scatter(x=df.index, y=sma20s, line=dict(color="#F59E0B", width=1), name="SMA 20"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=sma50s, line=dict(color="#3B82F6", width=1), name="SMA 50"), row=1, col=1)
 
-    fig.add_trace(
-        go.Scatter(x=df.index, y=sma20s, line=dict(color="#FFCA28", width=1), name="SMA 20"),
-        row=1, col=1,
-    )
-    fig.add_trace(
-        go.Scatter(x=df.index, y=sma50s, line=dict(color="#42A5F5", width=1), name="SMA 50"),
-        row=1, col=1,
-    )
-    if len(df) >= 200:
-        fig.add_trace(
-            go.Scatter(x=df.index, y=sma200s, line=dict(color="#AB47BC", width=1), name="SMA 200"),
-            row=1, col=1,
-        )
-
-    # Bollinger Bands
     bb_upper, bb_mid, bb_lower = _bollinger_series(close)
-    fig.add_trace(
-        go.Scatter(
-            x=df.index, y=bb_upper,
-            line=dict(color="rgba(150,150,150,0.3)", width=1, dash="dot"),
-            name="BB Upper",
-            showlegend=False,
-        ),
-        row=1, col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df.index, y=bb_lower,
-            line=dict(color="rgba(150,150,150,0.3)", width=1, dash="dot"),
-            fill="tonexty",
-            fillcolor="rgba(150,150,150,0.06)",
-            name="BB Lower",
-            showlegend=False,
-        ),
-        row=1, col=1,
-    )
+    fig.add_trace(go.Scatter(x=df.index, y=bb_upper, line=dict(color="rgba(99,102,241,0.2)", width=1, dash="dot"), showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=bb_lower, line=dict(color="rgba(99,102,241,0.2)", width=1, dash="dot"),
+                             fill="tonexty", fillcolor="rgba(99,102,241,0.04)", showlegend=False), row=1, col=1)
 
-    # Support / Resistance lines
-    if support is not None:
-        fig.add_hline(y=support, line_color="#26A69A", line_dash="dash", line_width=1,
-                      annotation_text=f"Support ${support:.2f}", annotation_font_color="#26A69A",
-                      row=1, col=1)
-    if resistance is not None:
-        fig.add_hline(y=resistance, line_color="#EF5350", line_dash="dash", line_width=1,
-                      annotation_text=f"Resistance ${resistance:.2f}", annotation_font_color="#EF5350",
-                      row=1, col=1)
+    entry_color = _ACCENT
+    sl_color = _DOWN
+    tp_color = _UP
 
-    # Volume bars
-    vol_colors = [
-        _UP if c >= o else _DOWN
-        for c, o in zip(df["close"], df["open"])
-    ]
-    fig.add_trace(
-        go.Bar(
-            x=df.index,
-            y=df["volume"],
-            marker_color=vol_colors,
-            name="Volume",
-            showlegend=False,
-        ),
-        row=2,
-        col=1,
-    )
+    fig.add_hline(y=strat["entry"], line_color=entry_color, line_width=2, line_dash="dash",
+                  annotation_text=f"Entry ${strat['entry']:.2f}", annotation_font_color=entry_color,
+                  annotation_font_size=11, row=1, col=1)
+    fig.add_hline(y=strat["stop_loss"], line_color=sl_color, line_width=2, line_dash="dash",
+                  annotation_text=f"SL ${strat['stop_loss']:.2f}", annotation_font_color=sl_color,
+                  annotation_font_size=11, row=1, col=1)
+    fig.add_hline(y=strat["take_profit_1"], line_color=tp_color, line_width=2, line_dash="dash",
+                  annotation_text=f"TP1 ${strat['take_profit_1']:.2f}", annotation_font_color=tp_color,
+                  annotation_font_size=11, row=1, col=1)
+    fig.add_hline(y=strat["take_profit_2"], line_color=tp_color, line_width=1.5, line_dash="dot",
+                  annotation_text=f"TP2 ${strat['take_profit_2']:.2f}", annotation_font_color=tp_color,
+                  annotation_font_size=10, row=1, col=1)
 
-    _apply_layout(
-        fig,
-        height=600,
-        title=dict(text=f"{ticker} – Candlestick", font=dict(size=15)),
-        xaxis_rangeslider_visible=False,
-        yaxis2=dict(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1"),
-    )
-    fig.update_xaxes(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1")
-    fig.update_yaxes(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1")
+    fig.add_hrect(y0=strat["entry_zone"][0], y1=strat["entry_zone"][1],
+                  fillcolor="rgba(99,102,241,0.08)", line_width=0, row=1, col=1)
+
+    vol_colors = [_UP if c >= o else _DOWN for c, o in zip(df["close"], df["open"])]
+    fig.add_trace(go.Bar(x=df.index, y=df["volume"], marker_color=vol_colors, showlegend=False, opacity=0.5), row=2, col=1)
+
+    _apply_layout(fig, height=520, xaxis_rangeslider_visible=False,
+                  title=dict(text=f"{ticker} — Strategy Map", font=dict(size=14, weight=600)))
+    fig.update_xaxes(gridcolor="#F3F4F6")
+    fig.update_yaxes(gridcolor="#F3F4F6")
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # Patterns detected
-    if patterns:
-        pattern_labels = {
-            "golden_cross": "✨ Golden Cross",
-            "death_cross": "☠️ Death Cross",
-            "doji": "➕ Doji",
-            "hammer": "\U0001F528 Hammer",
-        }
-        detected = ", ".join(pattern_labels.get(p, p) for p in patterns)
-        st.info(f"תבניות שזוהו: {detected}")
+    # ---- Agent Breakdown + Reasoning ----
+    st.markdown("")
+    agent_col, reason_col = st.columns([1, 1])
 
-# ===================================================================== #
-# TAB 2 -- Indicators                                                     #
-# ===================================================================== #
+    with agent_col:
+        st.markdown('<p class="rtl" style="font-weight:700; font-size:0.92rem; margin-bottom:12px;">סוכני AI</p>', unsafe_allow_html=True)
 
-with tab_indicators:
-    ind_col1, ind_col2 = st.columns(2)
+        def _agent_dot(sig):
+            if sig in (Signal.STRONG_BUY, Signal.BUY): return "dot-buy"
+            if sig in (Signal.STRONG_SELL, Signal.SELL): return "dot-sell"
+            return "dot-hold"
 
-    # --- RSI ---
-    with ind_col1:
+        agents_html = f"""
+        <div style="display:flex; flex-wrap:wrap; gap:8px; direction:rtl;">
+            <span class="agent-pill"><span class="dot {_agent_dot(tech_sig)}"></span>טכני: {_SIGNAL_LABEL[tech_sig]} ({tech_conf:.0%})</span>
+            <span class="agent-pill"><span class="dot {_agent_dot(fund_sig)}"></span>פונדמנטלי: {_SIGNAL_LABEL[fund_sig]} ({fund_conf:.0%})</span>
+        </div>
+        """
+        st.markdown(agents_html, unsafe_allow_html=True)
+
+        st.markdown("")
+
+        metrics_html = '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">'
+        metrics = [
+            ("RSI", f"{rsi_val:.1f}" if rsi_val else "N/A"),
+            ("ATR", f"${atr_val:.2f}" if atr_val else "N/A"),
+            ("Sharpe", f"{risk_metrics['sharpe_ratio']:.2f}" if risk_metrics['sharpe_ratio'] else "N/A"),
+            ("VaR 95%", f"{risk_metrics['var_95']:.2%}" if risk_metrics['var_95'] else "N/A"),
+        ]
+        for lbl, val in metrics:
+            metrics_html += f'<div class="metric-sm"><div class="m-lbl">{lbl}</div><div class="m-val">{val}</div></div>'
+        metrics_html += '</div>'
+        st.markdown(metrics_html, unsafe_allow_html=True)
+
+    with reason_col:
+        reason_parts = [f"<b>טכני:</b> {tech_reason}", f"<b>פונדמנטלי:</b> {fund_reason}"]
+        if dissents:
+            reason_parts.append("<b>דעות חולקות:</b> " + " · ".join(dissents))
+        if patterns:
+            pattern_map = {"golden_cross": "Golden Cross ✨", "death_cross": "Death Cross ☠️",
+                          "doji": "Doji", "hammer": "Hammer"}
+            reason_parts.append("<b>תבניות:</b> " + ", ".join(pattern_map.get(p, p) for p in patterns))
+
+        st.markdown(f"""
+        <div class="reasoning-box">
+            <div class="reason-title">ניתוח הסוכנים</div>
+            {'<br>'.join(reason_parts)}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ---- Position Calculator ----
+    st.markdown("---")
+    st.markdown('<p class="rtl" style="font-weight:700; font-size:0.92rem; margin-bottom:8px;">💰 חישוב פוזיציה</p>', unsafe_allow_html=True)
+
+    risk_dollars = account_size * (risk_pct / 100)
+    if strat["risk_per_share"] > 0:
+        shares = int(risk_dollars / strat["risk_per_share"])
+    else:
+        shares = 0
+    position_value = shares * strat["entry"]
+    position_pct = (position_value / account_size) * 100 if account_size > 0 else 0
+    potential_profit = shares * abs(strat["take_profit_1"] - strat["entry"])
+    potential_loss = shares * strat["risk_per_share"]
+
+    pc1, pc2, pc3, pc4, pc5 = st.columns(5)
+    with pc1:
+        st.markdown(f'<div class="metric-sm"><div class="m-lbl">חשבון</div><div class="m-val">${account_size:,.0f}</div></div>', unsafe_allow_html=True)
+    with pc2:
+        st.markdown(f'<div class="metric-sm"><div class="m-lbl">סיכון</div><div class="m-val">${risk_dollars:,.0f}</div></div>', unsafe_allow_html=True)
+    with pc3:
+        st.markdown(f'<div class="metric-sm"><div class="m-lbl">מניות</div><div class="m-val">{shares:,}</div></div>', unsafe_allow_html=True)
+    with pc4:
+        st.markdown(f'<div class="metric-sm"><div class="m-lbl">רווח פוט׳</div><div class="m-val" style="color:var(--up);">${potential_profit:,.0f}</div></div>', unsafe_allow_html=True)
+    with pc5:
+        st.markdown(f'<div class="metric-sm"><div class="m-lbl">הפסד מקס׳</div><div class="m-val" style="color:var(--down);">${potential_loss:,.0f}</div></div>', unsafe_allow_html=True)
+
+    # R:R bar
+    if potential_loss > 0:
+        total = potential_loss + potential_profit
+        fig_rr = go.Figure()
+        fig_rr.add_trace(go.Bar(x=[potential_loss/total], y=[""], orientation="h",
+                                marker_color=_DOWN, name=f"Risk ${potential_loss:,.0f}",
+                                text=f"Risk ${potential_loss:,.0f}", textposition="inside",
+                                textfont=dict(color="white", size=12)))
+        fig_rr.add_trace(go.Bar(x=[potential_profit/total], y=[""], orientation="h",
+                                marker_color=_UP, name=f"Reward ${potential_profit:,.0f}",
+                                text=f"Reward ${potential_profit:,.0f}", textposition="inside",
+                                textfont=dict(color="white", size=12)))
+        _apply_layout(fig_rr, height=56, barmode="stack", showlegend=False,
+                      margin=dict(l=0, r=0, t=0, b=0),
+                      xaxis=dict(visible=False), yaxis=dict(visible=False))
+        st.plotly_chart(fig_rr, use_container_width=True)
+
+    # ---- RSI + MACD mini charts ----
+    st.markdown("---")
+    ind1, ind2 = st.columns(2)
+
+    with ind1:
         rsi_s = _rsi_series(close)
         fig_rsi = go.Figure()
-        fig_rsi.add_trace(go.Scatter(x=df.index, y=rsi_s, line=dict(color="#AB47BC", width=1.5), name="RSI 14"))
-        fig_rsi.add_hline(y=70, line_color=_DOWN, line_dash="dash", line_width=0.8,
-                          annotation_text="70", annotation_font_color=_DOWN)
-        fig_rsi.add_hline(y=30, line_color=_UP, line_dash="dash", line_width=0.8,
-                          annotation_text="30", annotation_font_color=_UP)
-        fig_rsi.add_hrect(y0=70, y1=100, fillcolor=_DOWN, opacity=0.07, line_width=0)
-        fig_rsi.add_hrect(y0=0, y1=30, fillcolor=_UP, opacity=0.07, line_width=0)
-        _apply_layout(fig_rsi, height=300, title=dict(text="RSI (14)", font=dict(size=13)))
+        fig_rsi.add_trace(go.Scatter(x=df.index, y=rsi_s, line=dict(color=_ACCENT, width=1.5), name="RSI"))
+        fig_rsi.add_hline(y=70, line_color=_DOWN, line_dash="dash", line_width=0.8)
+        fig_rsi.add_hline(y=30, line_color=_UP, line_dash="dash", line_width=0.8)
+        fig_rsi.add_hrect(y0=70, y1=100, fillcolor=_DOWN, opacity=0.05, line_width=0)
+        fig_rsi.add_hrect(y0=0, y1=30, fillcolor=_UP, opacity=0.05, line_width=0)
+        _apply_layout(fig_rsi, height=220, title=dict(text="RSI (14)", font=dict(size=12)))
         st.plotly_chart(fig_rsi, use_container_width=True)
 
-    # --- MACD ---
-    with ind_col2:
+    with ind2:
         ml, ms, mh = _macd_series(close)
         fig_macd = go.Figure()
-        fig_macd.add_trace(go.Scatter(x=df.index, y=ml, line=dict(color="#42A5F5", width=1.5), name="MACD"))
-        fig_macd.add_trace(go.Scatter(x=df.index, y=ms, line=dict(color="#FFCA28", width=1.2), name="Signal"))
+        fig_macd.add_trace(go.Scatter(x=df.index, y=ml, line=dict(color="#3B82F6", width=1.5), name="MACD"))
+        fig_macd.add_trace(go.Scatter(x=df.index, y=ms, line=dict(color="#F59E0B", width=1.2), name="Signal"))
         hist_colors = [_UP if v >= 0 else _DOWN for v in mh.fillna(0)]
-        fig_macd.add_trace(go.Bar(x=df.index, y=mh, marker_color=hist_colors, name="Histogram", opacity=0.6))
-        _apply_layout(fig_macd, height=300, title=dict(text="MACD (12/26/9)", font=dict(size=13)))
+        fig_macd.add_trace(go.Bar(x=df.index, y=mh, marker_color=hist_colors, name="Histogram", opacity=0.5))
+        _apply_layout(fig_macd, height=220, title=dict(text="MACD (12/26/9)", font=dict(size=12)))
         st.plotly_chart(fig_macd, use_container_width=True)
 
-    ind_col3, ind_col4 = st.columns(2)
-
-    # --- Stochastic ---
-    with ind_col3:
-        stoch_k, stoch_d = _stochastic_series(df)
-        fig_stoch = go.Figure()
-        fig_stoch.add_trace(go.Scatter(x=df.index, y=stoch_k, line=dict(color="#42A5F5", width=1.5), name="%K"))
-        fig_stoch.add_trace(go.Scatter(x=df.index, y=stoch_d, line=dict(color="#FFCA28", width=1.2), name="%D"))
-        fig_stoch.add_hline(y=80, line_color=_DOWN, line_dash="dash", line_width=0.8)
-        fig_stoch.add_hline(y=20, line_color=_UP, line_dash="dash", line_width=0.8)
-        fig_stoch.add_hrect(y0=80, y1=100, fillcolor=_DOWN, opacity=0.07, line_width=0)
-        fig_stoch.add_hrect(y0=0, y1=20, fillcolor=_UP, opacity=0.07, line_width=0)
-        _apply_layout(fig_stoch, height=300, title=dict(text="Stochastic (14/3)", font=dict(size=13)))
-        st.plotly_chart(fig_stoch, use_container_width=True)
-
-    # --- ATR ---
-    with ind_col4:
-        atr_s = _atr_series(df)
-        fig_atr = go.Figure()
-        fig_atr.add_trace(go.Scatter(x=df.index, y=atr_s, line=dict(color="#FF7043", width=1.5), name="ATR 14", fill="tozeroy", fillcolor="rgba(255,112,67,0.10)"))
-        _apply_layout(fig_atr, height=300, title=dict(text="ATR (14)", font=dict(size=13)))
-        st.plotly_chart(fig_atr, use_container_width=True)
-
-    # Indicator summary table
-    st.markdown('<h4 class="rtl">סיכום אינדיקטורים</h4>', unsafe_allow_html=True)
-    summary_data = {
-        "אינדיקטור": [
-            "RSI (14)", "MACD Line", "MACD Signal", "MACD Histogram",
-            "SMA 20", "SMA 50", "SMA 200",
-            "EMA 12", "EMA 26",
-            "Bollinger Upper", "Bollinger Mid", "Bollinger Lower",
-            "ATR (14)", "OBV",
-            "Stochastic %K", "Stochastic %D",
-            "Support", "Resistance",
-        ],
-        "ערך": [
-            f"{rsi_val:.2f}" if rsi_val else "N/A",
-            f"{macd_vals['macd_line']:.4f}" if macd_vals["macd_line"] is not None else "N/A",
-            f"{macd_vals['macd_signal']:.4f}" if macd_vals["macd_signal"] is not None else "N/A",
-            f"{macd_vals['macd_histogram']:.4f}" if macd_vals["macd_histogram"] is not None else "N/A",
-            f"${sma20_val:.2f}" if sma20_val else "N/A",
-            f"${sma50_val:.2f}" if sma50_val else "N/A",
-            f"${sma200_val:.2f}" if sma200_val else "N/A",
-            f"${ema12_val:.2f}" if ema12_val else "N/A",
-            f"${ema26_val:.2f}" if ema26_val else "N/A",
-            f"${boll_vals['bollinger_upper']:.2f}" if boll_vals["bollinger_upper"] is not None else "N/A",
-            f"${boll_vals['bollinger_middle']:.2f}" if boll_vals["bollinger_middle"] is not None else "N/A",
-            f"${boll_vals['bollinger_lower']:.2f}" if boll_vals["bollinger_lower"] is not None else "N/A",
-            f"${atr_val:.2f}" if atr_val else "N/A",
-            f"{obv_val:,.0f}" if obv_val else "N/A",
-            f"{stoch_vals['stochastic_k']:.2f}" if stoch_vals["stochastic_k"] is not None else "N/A",
-            f"{stoch_vals['stochastic_d']:.2f}" if stoch_vals["stochastic_d"] is not None else "N/A",
-            f"${support:.2f}" if support else "N/A",
-            f"${resistance:.2f}" if resistance else "N/A",
-        ],
-    }
-    st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
 
 # ===================================================================== #
-# TAB 3 -- AI Signal                                                      #
+# TAB 2 — HOT 5                                                           #
 # ===================================================================== #
 
-with tab_ai:
-    # --- Signal badge ---
-    st.markdown(
-        f'<div style="text-align:center; margin:20px 0;">'
-        f'<span class="signal-badge {_SIGNAL_BADGE_CLASS[action]}">'
-        f'{_SIGNAL_LABEL[action]}'
-        f'</span></div>',
-        unsafe_allow_html=True,
-    )
+with tab_hot5:
+    st.markdown(f"""
+    <div style="text-align:center; padding:12px 0 24px;">
+        <div style="font-size:1.5rem; font-weight:900;">🔥 5 מניות חמות היום</div>
+        <div style="font-size:0.82rem; color:var(--text-secondary);">הסוכנים סרקו 30 מניות ובחרו את הטובות ביותר · {datetime.utcnow().strftime('%Y-%m-%d')}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # --- Confidence & weighted score ---
-    conf_col, score_col = st.columns(2)
-    with conf_col:
-        st.markdown('<p class="rtl" style="font-weight:600;">ביטחון כללי</p>', unsafe_allow_html=True)
-        st.progress(min(1.0, max(0.0, total_conf)))
-        st.markdown(f"<p style='text-align:center; font-size:1.3rem; font-weight:700;'>{total_conf:.1%}</p>", unsafe_allow_html=True)
-    with score_col:
-        st.markdown('<p class="rtl" style="font-weight:600;">ציון משוקלל</p>', unsafe_allow_html=True)
-        # Normalise score to 0-1 for progress bar display (score range -1..+1)
-        normalised = (weighted_score + 1) / 2
-        st.progress(min(1.0, max(0.0, normalised)))
-        st.markdown(f"<p style='text-align:center; font-size:1.3rem; font-weight:700;'>{weighted_score:+.4f}</p>", unsafe_allow_html=True)
+    with st.spinner("הסוכנים סורקים 30 מניות..."):
+        hot_stocks = fetch_hot_candidates()
 
-    st.markdown("---")
-
-    # --- Agent breakdown ---
-    st.markdown('<h3 class="rtl">פירוט סוכנים</h3>', unsafe_allow_html=True)
-
-    agent_cols = st.columns(3)
-
-    # Technical agent
-    with agent_cols[0]:
-        st.markdown(
-            f'<div class="agent-card">'
-            f'<div style="font-weight:700; font-size:1.05rem;">\U0001F4C9 טכני ({TECHNICAL_WEIGHT:.0%})</div>'
-            f'<div style="margin:8px 0;">'
-            f'<span class="signal-badge {_SIGNAL_BADGE_CLASS[tech_signal]}" style="font-size:0.9rem; padding:4px 14px;">'
-            f'{_SIGNAL_LABEL[tech_signal]}</span></div>'
-            f'<div style="color:var(--text-dim); font-size:0.82rem;">{tech_reasoning}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(f"ביטחון: {tech_conf:.0%}")
-        st.progress(min(1.0, max(0.0, tech_conf)))
-
-    # Fundamental agent
-    with agent_cols[1]:
-        st.markdown(
-            f'<div class="agent-card">'
-            f'<div style="font-weight:700; font-size:1.05rem;">\U0001F4CA פונדמנטלי ({FUNDAMENTAL_WEIGHT:.0%})</div>'
-            f'<div style="margin:8px 0;">'
-            f'<span class="signal-badge {_SIGNAL_BADGE_CLASS[fund_signal]}" style="font-size:0.9rem; padding:4px 14px;">'
-            f'{_SIGNAL_LABEL[fund_signal]}</span></div>'
-            f'<div style="color:var(--text-dim); font-size:0.82rem;">{fund_reasoning}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(f"ביטחון: {fund_conf:.0%}")
-        st.progress(min(1.0, max(0.0, fund_conf)))
-
-    # Sentiment agent
-    with agent_cols[2]:
-        st.markdown(
-            f'<div class="agent-card">'
-            f'<div style="font-weight:700; font-size:1.05rem;">\U0001F4F0 סנטימנט ({SENTIMENT_WEIGHT:.0%})</div>'
-            f'<div style="margin:8px 0;">'
-            f'<span class="signal-badge {_SIGNAL_BADGE_CLASS[sent_signal]}" style="font-size:0.9rem; padding:4px 14px;">'
-            f'{_SIGNAL_LABEL[sent_signal]}</span></div>'
-            f'<div style="color:var(--text-dim); font-size:0.82rem;">{sent_reasoning}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(f"ביטחון: {sent_conf:.0%}")
-        st.progress(min(1.0, max(0.0, sent_conf)))
-
-    st.markdown("---")
-
-    # --- Risk assessment ---
-    st.markdown('<h3 class="rtl">הערכת סיכון</h3>', unsafe_allow_html=True)
-
-    risk_cols = st.columns(5)
-    with risk_cols[0]:
-        st.markdown(
-            f'<div class="metric-card"><div class="label">רמת סיכון</div>'
-            f'<div><span class="{_RISK_BADGE_CLASS[risk_level]}">{_RISK_LABEL[risk_level]}</span></div></div>',
-            unsafe_allow_html=True,
-        )
-    with risk_cols[1]:
-        st.markdown(
-            _metric_html(
-                "אחוז תנודתיות",
-                f"{risk_metrics['volatility_percentile']:.0%}",
-            ),
-            unsafe_allow_html=True,
-        )
-    with risk_cols[2]:
-        var_display = f"{risk_metrics['var_95']:.2%}" if risk_metrics["var_95"] is not None else "N/A"
-        st.markdown(
-            _metric_html("VaR 95%", var_display),
-            unsafe_allow_html=True,
-        )
-    with risk_cols[3]:
-        sharpe_display = f"{risk_metrics['sharpe_ratio']:.2f}" if risk_metrics["sharpe_ratio"] is not None else "N/A"
-        st.markdown(
-            _metric_html("Sharpe", sharpe_display),
-            unsafe_allow_html=True,
-        )
-    with risk_cols[4]:
-        mdd_display = f"{risk_metrics['max_drawdown']:.2%}" if risk_metrics["max_drawdown"] is not None else "N/A"
-        st.markdown(
-            _metric_html("Max Drawdown", mdd_display),
-            unsafe_allow_html=True,
-        )
-
-    # Risk flags
-    if risk_metrics["flags"]:
-        for flag in risk_metrics["flags"]:
-            st.warning(flag)
-
-    # --- Dissenting opinions ---
-    if dissents:
-        st.markdown("---")
-        st.markdown('<h4 class="rtl">דעות חולקות</h4>', unsafe_allow_html=True)
-        for d in dissents:
-            st.markdown(f'<div class="rtl" style="background:var(--panel); padding:10px 16px; border-radius:6px; margin-bottom:6px; border-left:3px solid #FFA726;">{d}</div>', unsafe_allow_html=True)
-
-# ===================================================================== #
-# TAB 4 -- Calculator                                                     #
-# ===================================================================== #
-
-with tab_calc:
-    st.markdown('<h3 class="rtl">מחשבון גודל פוזיציה</h3>', unsafe_allow_html=True)
-
-    calc_col1, calc_col2 = st.columns(2)
-
-    with calc_col1:
-        st.markdown('<p class="rtl" style="font-weight:600;">קלטים</p>', unsafe_allow_html=True)
-
-        entry_price = st.number_input(
-            "מחיר כניסה ($)",
-            min_value=0.01,
-            value=round(last_close, 2),
-            step=0.01,
-            format="%.2f",
-        )
-
-        stop_mode = st.radio(
-            "שיטת Stop Loss",
-            options=["ידני", "ATR"],
-            horizontal=True,
-        )
-
-        if stop_mode == "ATR" and atr_val is not None:
-            sl_price = round(entry_price - atr_val * atr_multiplier, 2)
-            st.markdown(
-                f'<p style="color:var(--text-dim); font-size:0.85rem;">'
-                f'ATR={atr_val:.2f} x {atr_multiplier} = ${atr_val * atr_multiplier:.2f} below entry</p>',
-                unsafe_allow_html=True,
-            )
-        else:
-            sl_price = round(entry_price * 0.95, 2)
-
-        stop_loss_price = st.number_input(
-            "Stop Loss ($)",
-            min_value=0.01,
-            value=sl_price,
-            step=0.01,
-            format="%.2f",
-        )
-
-        calc_account = st.number_input(
-            "גודל חשבון ($)",
-            min_value=1000,
-            value=account_size,
-            step=1000,
-            key="calc_account",
-        )
-
-        calc_risk_pct = st.slider(
-            "סיכון (%)",
-            min_value=0.25,
-            max_value=5.0,
-            value=risk_pct,
-            step=0.25,
-            key="calc_risk_pct",
-        )
-
-        calc_reward = st.selectbox(
-            "יחס סיכון:תגמול",
-            options=["1:1.5", "1:2", "1:3", "1:4"],
-            index=["1:1.5", "1:2", "1:3", "1:4"].index(reward_ratio),
-            key="calc_reward",
-        )
-
-    # --- Calculations ---
-    r_value = entry_price - stop_loss_price
-    if r_value <= 0:
-        with calc_col2:
-            st.error("מחיר ה-Stop Loss חייב להיות נמוך ממחיר הכניסה.")
+    if not hot_stocks:
+        st.warning("לא ניתן לטעון נתונים. נסה שוב.")
     else:
-        risk_dollars = calc_account * (calc_risk_pct / 100)
-        shares = int(risk_dollars / r_value)
-        reward_mult = float(calc_reward.split(":")[1])
-        tp_price = entry_price + r_value * reward_mult
-        potential_profit = shares * r_value * reward_mult
-        position_value = shares * entry_price
-        position_pct = (position_value / calc_account) * 100 if calc_account > 0 else 0
+        for i, stock in enumerate(hot_stocks, 1):
+            is_buy = stock["action"] in (Signal.STRONG_BUY, Signal.BUY)
+            is_sell = stock["action"] in (Signal.STRONG_SELL, Signal.SELL)
+            sig_class = "buy" if is_buy else ("sell" if is_sell else "")
+            sig_label = _SIGNAL_LABEL[stock["action"]]
+            change_color = _UP if stock["change_pct"] >= 0 else _DOWN
+            change_sign = "+" if stock["change_pct"] >= 0 else ""
 
-        with calc_col2:
-            st.markdown('<p class="rtl" style="font-weight:600;">תוצאות</p>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="hot-row" style="direction:rtl;">
+                <div class="hot-rank">{i}</div>
+                <div style="flex:1; margin:0 16px;">
+                    <div class="hot-ticker">{stock['ticker']}</div>
+                    <div class="hot-name">{stock['name']}</div>
+                </div>
+                <div style="text-align:center; min-width:80px;">
+                    <div style="font-size:1.1rem; font-weight:700;">${stock['price']:,.2f}</div>
+                    <div style="font-size:0.78rem; font-weight:600; color:{change_color};">{change_sign}{stock['change_pct']:.2f}%</div>
+                </div>
+                <div style="text-align:center; min-width:100px; margin:0 12px;">
+                    <span class="hot-signal {sig_class}">{sig_label}</span>
+                </div>
+                <div style="text-align:center; min-width:60px;">
+                    <div class="hot-conf">{stock['confidence']:.0%}</div>
+                    <div style="font-size:0.68rem; color:var(--text-muted);">ביטחון</div>
+                </div>
+                <div style="min-width:40px; text-align:center;">
+                    <span class="risk-pill {_RISK_CLASS[stock['risk']]}">{_RISK_LABEL[stock['risk']]}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-            res_cols = st.columns(2)
-            with res_cols[0]:
-                st.markdown(
-                    _metric_html("R Value", f"${r_value:.2f}"),
-                    unsafe_allow_html=True,
-                )
-            with res_cols[1]:
-                st.markdown(
-                    _metric_html("כמות מניות", f"{shares:,}"),
-                    unsafe_allow_html=True,
-                )
+        st.markdown("")
+        st.markdown("""
+        <div style="text-align:center; padding:16px; background:var(--panel-alt); border-radius:var(--radius-sm); border:1px solid var(--border);">
+            <div style="font-size:0.78rem; color:var(--text-secondary);">
+                💡 לחץ על שם מניה בסיידבר כדי לקבל אסטרטגיית מסחר מפורטת
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-            res_cols2 = st.columns(2)
-            with res_cols2[0]:
-                st.markdown(
-                    _metric_html("סיכון ($)", f"${risk_dollars:,.2f}", f"{calc_risk_pct:.2f}% מהחשבון", False),
-                    unsafe_allow_html=True,
-                )
-            with res_cols2[1]:
-                st.markdown(
-                    _metric_html("Take Profit", f"${tp_price:.2f}"),
-                    unsafe_allow_html=True,
-                )
-
-            res_cols3 = st.columns(2)
-            with res_cols3[0]:
-                st.markdown(
-                    _metric_html(
-                        "רווח פוטנציאלי",
-                        f"${potential_profit:,.2f}",
-                        f"{calc_reward}",
-                        True,
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with res_cols3[1]:
-                st.markdown(
-                    _metric_html(
-                        "שווי פוזיציה",
-                        f"${position_value:,.2f}",
-                        f"{position_pct:.1f}% מהחשבון",
-                        position_pct <= 10,
-                    ),
-                    unsafe_allow_html=True,
-                )
-
-            # --- Risk/Reward visual bar ---
-            st.markdown("")
-            st.markdown('<p style="font-weight:600; text-align:center;">Risk / Reward</p>', unsafe_allow_html=True)
-
-            total_range = r_value + r_value * reward_mult
-            risk_frac = r_value / total_range if total_range > 0 else 0.5
-            reward_frac = 1 - risk_frac
-
-            fig_rr = go.Figure()
-            fig_rr.add_trace(go.Bar(
-                x=[risk_frac],
-                y=["R/R"],
-                orientation="h",
-                marker_color=_DOWN,
-                name=f"Risk ${risk_dollars:,.0f}",
-                text=f"Risk ${risk_dollars:,.0f}",
-                textposition="inside",
-                textfont=dict(color="white", size=13),
-                hoverinfo="name",
-            ))
-            fig_rr.add_trace(go.Bar(
-                x=[reward_frac],
-                y=["R/R"],
-                orientation="h",
-                marker_color=_UP,
-                name=f"Reward ${potential_profit:,.0f}",
-                text=f"Reward ${potential_profit:,.0f}",
-                textposition="inside",
-                textfont=dict(color="white", size=13),
-                hoverinfo="name",
-            ))
-            _apply_layout(
-                fig_rr,
-                height=80,
-                barmode="stack",
-                showlegend=False,
-                margin=dict(l=0, r=0, t=0, b=0),
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False),
-            )
-            st.plotly_chart(fig_rr, use_container_width=True)
-
-            # Price levels on a mini chart
-            fig_levels = go.Figure()
-            fig_levels.add_trace(go.Scatter(
-                x=["Stop Loss", "Entry", "Take Profit"],
-                y=[stop_loss_price, entry_price, tp_price],
-                mode="lines+markers+text",
-                text=[f"${stop_loss_price:.2f}", f"${entry_price:.2f}", f"${tp_price:.2f}"],
-                textposition="top center",
-                textfont=dict(size=13),
-                marker=dict(size=14, color=[_DOWN, _ACCENT, _UP]),
-                line=dict(color="#546E7A", width=2, dash="dot"),
-                showlegend=False,
-            ))
-            _apply_layout(
-                fig_levels,
-                height=220,
-                title=dict(text="רמות מחיר", font=dict(size=13)),
-            )
-            st.plotly_chart(fig_levels, use_container_width=True)
 
 # ===================================================================== #
-#                          FOOTER                                         #
+#                          FOOTER                                          #
 # ===================================================================== #
 
 st.markdown("---")
-st.markdown(
-    '<p style="text-align:center; color:var(--text-dim); font-size:0.75rem;">'
-    "AI Broker Terminal | Data: Yahoo Finance | "
-    "האותות אינם המלצה להשקעה. "
-    "השתמש באחריותך."
-    "</p>",
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<p style="text-align:center; color:var(--text-muted); font-size:0.72rem;">
+    AI Broker Trading Strategy Platform · Data: Yahoo Finance ·
+    האותות אינם המלצה להשקעה · השתמש באחריותך
+</p>
+""", unsafe_allow_html=True)
