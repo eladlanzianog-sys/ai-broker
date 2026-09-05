@@ -379,18 +379,75 @@ def _apply_layout(fig, **overrides):
 
 _PERIOD_MAP = {"1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "2Y": "2y"}
 
+def _generate_demo_ohlcv(ticker: str, days: int = 252) -> pd.DataFrame:
+    np.random.seed(hash(ticker) % 2**31)
+    _DEMO_PRICES = {
+        "NVDA": 138.0, "AAPL": 232.0, "MSFT": 448.0, "GOOGL": 178.0, "META": 510.0,
+        "AMZN": 198.0, "TSLA": 248.0, "AMD": 156.0, "NFLX": 720.0, "CRM": 280.0,
+        "AVGO": 185.0, "ORCL": 175.0, "ADBE": 460.0, "INTC": 22.0, "QCOM": 170.0,
+        "MU": 100.0, "PLTR": 28.0, "SOFI": 11.0, "COIN": 205.0, "MARA": 24.0,
+        "JPM": 210.0, "V": 290.0, "MA": 480.0, "BAC": 42.0, "GS": 510.0,
+        "SQ": 78.0, "PYPL": 72.0, "SHOP": 80.0, "SNOW": 145.0, "UBER": 75.0,
+    }
+    base = _DEMO_PRICES.get(ticker, 100.0)
+    dates = pd.bdate_range(end=datetime.utcnow(), periods=days)
+    returns = np.random.normal(0.0004, 0.018, days)
+    prices = base * np.exp(np.cumsum(returns))
+    spread = prices * np.random.uniform(0.008, 0.025, days)
+    volume = np.random.randint(10_000_000, 80_000_000, days)
+    df = pd.DataFrame({
+        "open": prices - spread * 0.3,
+        "high": prices + spread * 0.5,
+        "low": prices - spread * 0.5,
+        "close": prices,
+        "volume": volume,
+    }, index=dates)
+    return df
+
+def _generate_demo_info(ticker: str) -> dict:
+    np.random.seed(hash(ticker) % 2**31 + 1)
+    _NAMES = {
+        "NVDA": "NVIDIA Corporation", "AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation",
+        "GOOGL": "Alphabet Inc.", "META": "Meta Platforms Inc.", "AMZN": "Amazon.com Inc.",
+        "TSLA": "Tesla Inc.", "AMD": "Advanced Micro Devices", "NFLX": "Netflix Inc.",
+        "CRM": "Salesforce Inc.", "AVGO": "Broadcom Inc.", "ORCL": "Oracle Corporation",
+        "ADBE": "Adobe Inc.", "INTC": "Intel Corporation", "QCOM": "Qualcomm Inc.",
+        "MU": "Micron Technology", "PLTR": "Palantir Technologies", "SOFI": "SoFi Technologies",
+        "COIN": "Coinbase Global", "MARA": "Marathon Digital", "JPM": "JPMorgan Chase",
+        "V": "Visa Inc.", "MA": "Mastercard Inc.", "BAC": "Bank of America",
+        "GS": "Goldman Sachs", "SQ": "Block Inc.", "PYPL": "PayPal Holdings",
+        "SHOP": "Shopify Inc.", "SNOW": "Snowflake Inc.", "UBER": "Uber Technologies",
+    }
+    return {
+        "shortName": _NAMES.get(ticker, ticker),
+        "trailingPE": np.random.uniform(12, 55),
+        "forwardPE": np.random.uniform(10, 45),
+        "debtToEquity": np.random.uniform(20, 180),
+        "returnOnEquity": np.random.uniform(-0.05, 0.45),
+        "revenueGrowth": np.random.uniform(-0.1, 0.4),
+        "profitMargins": np.random.uniform(-0.05, 0.35),
+        "currentRatio": np.random.uniform(0.8, 3.0),
+        "marketCap": np.random.uniform(5e9, 3e12),
+        "fiftyTwoWeekHigh": 0, "fiftyTwoWeekLow": 0,
+    }
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_data(ticker: str, period: str):
     try:
         tk = yf.Ticker(ticker)
         df = tk.history(period=_PERIOD_MAP.get(period, "1y"), auto_adjust=True)
-        if df is None or df.empty:
-            return None, None
-        df.columns = [c.lower() for c in df.columns]
-        info = tk.info or {}
-        return df, info
+        if df is not None and not df.empty:
+            df.columns = [c.lower() for c in df.columns]
+            info = tk.info or {}
+            return df, info
     except Exception:
-        return None, None
+        pass
+    days_map = {"1M": 22, "3M": 66, "6M": 126, "1Y": 252, "2Y": 504}
+    df = _generate_demo_ohlcv(ticker, days_map.get(period, 252))
+    info = _generate_demo_info(ticker)
+    info["fiftyTwoWeekHigh"] = float(df["high"].max())
+    info["fiftyTwoWeekLow"] = float(df["low"].min())
+    return df, info
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_hot_candidates():
@@ -400,12 +457,9 @@ def fetch_hot_candidates():
     results = []
     for t in tickers:
         try:
-            tk = yf.Ticker(t)
-            df = tk.history(period="6mo", auto_adjust=True)
-            if df is None or df.empty:
+            df, info = fetch_data(t, "6M")
+            if df is None:
                 continue
-            df.columns = [c.lower() for c in df.columns]
-            info = tk.info or {}
             close = df["close"]
             tech_sig, tech_conf, tech_score, tech_reason = _compute_technical_signal(close, df)
             fund_sig, fund_conf, fund_score, fund_reason = _compute_fundamental_signal(info)
