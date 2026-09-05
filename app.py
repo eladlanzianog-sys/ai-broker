@@ -74,16 +74,17 @@ st.set_page_config(
 _CSS = """
 <style>
 :root {
-    --bg: #131722;
-    --panel: #1E222D;
-    --up: #26A69A;
-    --down: #EF5350;
-    --accent: #2962FF;
-    --text: #D1D4DC;
-    --text-dim: #787B86;
+    --bg: #FAFBFC;
+    --panel: #FFFFFF;
+    --up: #16A34A;
+    --down: #DC2626;
+    --accent: #2563EB;
+    --text: #1E293B;
+    --text-dim: #64748B;
+    --border: #E2E8F0;
 }
 
-/* Force dark background everywhere */
+/* Light professional background */
 html, body, [data-testid="stAppViewContainer"],
 [data-testid="stApp"], .main, .block-container {
     background-color: var(--bg) !important;
@@ -92,6 +93,7 @@ html, body, [data-testid="stAppViewContainer"],
 
 [data-testid="stSidebar"] {
     background-color: var(--panel) !important;
+    border-left: 1px solid var(--border) !important;
 }
 
 [data-testid="stHeader"] {
@@ -107,9 +109,11 @@ html, body, [data-testid="stAppViewContainer"],
 /* Metric cards */
 .metric-card {
     background: var(--panel);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px 20px;
     text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 .metric-card .label {
     font-size: 0.78rem;
@@ -133,32 +137,36 @@ html, body, [data-testid="stAppViewContainer"],
     font-weight: 700;
     letter-spacing: 1px;
 }
-.badge-strong-buy  { background: #00695C; color: #E0F2F1; }
-.badge-buy         { background: #26A69A; color: #E0F2F1; }
-.badge-hold        { background: #546E7A; color: #ECEFF1; }
-.badge-sell        { background: #EF5350; color: #FFEBEE; }
-.badge-strong-sell { background: #B71C1C; color: #FFCDD2; }
+.badge-strong-buy  { background: #15803D; color: #FFFFFF; }
+.badge-buy         { background: #16A34A; color: #FFFFFF; }
+.badge-hold        { background: #6B7280; color: #FFFFFF; }
+.badge-sell        { background: #DC2626; color: #FFFFFF; }
+.badge-strong-sell { background: #991B1B; color: #FFFFFF; }
 
 /* Risk badge */
-.risk-low      { background: #26A69A; color: #E0F2F1; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-.risk-moderate { background: #FFA726; color: #1E222D; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-.risk-high     { background: #EF5350; color: #FFEBEE; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
-.risk-extreme  { background: #B71C1C; color: #FFCDD2; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
+.risk-low      { background: #DCFCE7; color: #166534; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
+.risk-moderate { background: #FEF3C7; color: #92400E; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
+.risk-high     { background: #FEE2E2; color: #991B1B; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
+.risk-extreme  { background: #991B1B; color: #FFFFFF; padding: 4px 14px; border-radius: 4px; font-weight: 600; }
 
 /* Agent card */
 .agent-card {
     background: var(--panel);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 18px 22px;
     margin-bottom: 10px;
-    border-left: 4px solid var(--accent);
+    border-right: 4px solid var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 /* Calculator result */
 .calc-result {
     background: var(--panel);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 20px 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 /* Tab styling */
@@ -183,19 +191,19 @@ st.markdown(_CSS, unsafe_allow_html=True)
 # ===================================================================== #
 
 _PLOTLY_LAYOUT = dict(
-    template="plotly_dark",
-    paper_bgcolor="#131722",
-    plot_bgcolor="#131722",
-    font=dict(color="#D1D4DC"),
-    xaxis=dict(gridcolor="#2A2E39", zerolinecolor="#2A2E39"),
-    yaxis=dict(gridcolor="#2A2E39", zerolinecolor="#2A2E39"),
+    template="plotly_white",
+    paper_bgcolor="#FFFFFF",
+    plot_bgcolor="#FFFFFF",
+    font=dict(color="#1E293B"),
+    xaxis=dict(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1"),
+    yaxis=dict(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1"),
     margin=dict(l=50, r=20, t=40, b=30),
-    legend=dict(bgcolor="rgba(0,0,0,0)"),
+    legend=dict(bgcolor="rgba(255,255,255,0.8)"),
 )
 
-_UP = "#26A69A"
-_DOWN = "#EF5350"
-_ACCENT = "#2962FF"
+_UP = "#16A34A"
+_DOWN = "#DC2626"
+_ACCENT = "#2563EB"
 
 
 def _apply_layout(fig: go.Figure, **overrides) -> go.Figure:
@@ -939,10 +947,10 @@ with tab_overview:
         height=600,
         title=dict(text=f"{ticker} – Candlestick", font=dict(size=15)),
         xaxis_rangeslider_visible=False,
-        yaxis2=dict(gridcolor="#2A2E39", zerolinecolor="#2A2E39"),
+        yaxis2=dict(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1"),
     )
-    fig.update_xaxes(gridcolor="#2A2E39", zerolinecolor="#2A2E39")
-    fig.update_yaxes(gridcolor="#2A2E39", zerolinecolor="#2A2E39")
+    fig.update_xaxes(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1")
+    fig.update_yaxes(gridcolor="#E2E8F0", zerolinecolor="#CBD5E1")
 
     st.plotly_chart(fig, use_container_width=True)
 
