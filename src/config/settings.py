@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     scan_minute: int = 0
     scan_only_actionable: bool = True
 
+    automation_mode: str = "advanced"
+    automation_monitor_interval: int = 900
+    automation_health_interval: int = 3600
+    automation_max_errors_per_day: int = 20
+    automation_position_alert_pct: float = -5.0
+
     ibkr_host: str = "127.0.0.1"
     ibkr_port: int = 7497
     ibkr_client_id: int = 1
